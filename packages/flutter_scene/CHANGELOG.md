@@ -1,3 +1,12 @@
+## Unreleased
+
+* `Material.renderOrder` (`.fmat` `render_order:`) sorts a material's draws ahead of `Node.renderOrder`, so a whole class of translucent overlays (road paint, shadow decals, markers) is ordered in one place.
+* `.fscene` documents carry `Node.renderOrder` and `Material.renderOrder`, and the editor sets a node's order from the inspector and the `setNodeRenderOrder` command.
+* `.fscene` documents keep an `UnlitMaterial`'s `alphaMode`, so a translucent unlit material no longer reloads opaque.
+* Physical materials realized from a `.fscene` keep their `depthBias` and `depthLayer`.
+* Nodes added by a `.fscene` hot reload keep their shadow casting mode.
+* Update `flutter_scene-idioms` skill (v16) with render order and stacked translucent overlays.
+
 ## 0.24.1
 
 * On Apple platforms, a `ShaderMaterial` whose fragment shader reads a varying its vertex shader does not write at that location and type is skipped with a message naming the varying, instead of crashing the app on Flutter 3.47. `Scene.preload` also waits for the shader reflection the check reads.
