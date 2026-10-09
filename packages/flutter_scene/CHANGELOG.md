@@ -1,3 +1,7 @@
+## 0.24.3
+
+* Additive sprites and `.fmat` materials, bloom, and lens flares show over the content behind a scene with a transparent background, adding light to it. They were discarded wherever nothing opaque was drawn.
+
 ## 0.24.2
 
 * `Scene.dispose` drops the render targets and history textures a scene keeps across frames, so they no longer wait on the scene object being collected. A disposed scene throws a `StateError` on render.
