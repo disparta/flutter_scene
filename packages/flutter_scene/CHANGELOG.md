@@ -1,3 +1,7 @@
+## 0.24.3
+
+* Billboard, `Sprite`, and particle sizes scale with their node, so scaling an effect node scales its sprites along with their spacing and speed. A non-uniform scale sizes them by its smallest axis. A shrunken batch near the frame edge is no longer culled while still on screen.
+
 ## 0.24.2
 
 * `Scene.dispose` drops the render targets and history textures a scene keeps across frames, so they no longer wait on the scene object being collected. A disposed scene throws a `StateError` on render.
