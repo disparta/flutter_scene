@@ -58,6 +58,7 @@ import 'render/auto_exposure_pass.dart';
 import 'render/bloom_pass.dart';
 import 'render/custom_render_pass.dart';
 import 'render/fsr1_pass.dart';
+import 'render/sgsr1_pass.dart';
 import 'render/scene_upscaling.dart';
 import 'render/depth_prepass.dart';
 import 'render/fxaa_pass.dart';
@@ -333,17 +334,44 @@ base class Scene implements SceneGraph {
   SceneUpscaling _upscaling = SceneUpscaling.none;
 
   /// Opt-in reconstruction of reduced screen views; defaults to none.
-  /// Requesting FSR starts optional initialization without blocking rendering.
+  /// Requesting an upscaler starts optional initialization without blocking rendering.
   SceneUpscaling get upscaling => _upscaling;
   set upscaling(SceneUpscaling value) {
     _upscaling = value;
     if (value == SceneUpscaling.fsr1) Fsr1Resources.initialize().ignore();
+    if (value == SceneUpscaling.sgsr1) Sgsr1Resources.initialize().ignore();
   }
 
   /// Optional initialization; never affects the base renderer on failure.
   static Future<bool> initializeFsr1Resources() => Fsr1Resources.initialize();
   static bool get fsr1Available => Fsr1Resources.available;
   static Object? get fsr1Failure => Fsr1Resources.failure;
+
+  /// Optional SGSR 1 capability probe; independent of FSR readiness/failure.
+  static Future<bool> initializeSgsr1Resources() => Sgsr1Resources.initialize();
+  static bool get sgsr1Available => Sgsr1Resources.available;
+  static Object? get sgsr1Failure => Sgsr1Resources.failure;
+
+  /// Process-wide transient allocation count, for steady-state profiling.
+  static int get transientTexturesCreated =>
+      TransientTexturePool.texturesCreated;
+
+  bool get _upscalerAvailable => switch (_upscaling) {
+    SceneUpscaling.none => false,
+    SceneUpscaling.fsr1 => Fsr1Resources.available,
+    SceneUpscaling.sgsr1 => Sgsr1Resources.available,
+  };
+
+  void _disableUpscaler(Object error) {
+    switch (_upscaling) {
+      case SceneUpscaling.fsr1:
+        Fsr1Resources.disable(error);
+      case SceneUpscaling.sgsr1:
+        Sgsr1Resources.disable(error);
+      case SceneUpscaling.none:
+        break;
+    }
+  }
 
   double _renderScale = 1.0;
 
@@ -2552,7 +2580,7 @@ base class Scene implements SceneGraph {
       scale: view.renderScale ?? _renderScale,
       adaptiveScale: adaptiveRenderScale,
       mode: _upscaling,
-      available: Fsr1Resources.available,
+      available: _upscalerAvailable,
     );
     final pixelSize = dimensions.internal;
     var outputSize = dimensions.output;
@@ -2605,7 +2633,7 @@ base class Scene implements SceneGraph {
       );
     } catch (error) {
       if (!dimensions.upscaling) rethrow;
-      Fsr1Resources.disable(error);
+      _disableUpscaler(error);
       outputSize = pixelSize;
       swapchainColor = surface.getNextSwapchainColorTexture(
         pixelSize,
@@ -2617,6 +2645,8 @@ base class Scene implements SceneGraph {
       outputColor: swapchainColor,
       pixelSize: pixelSize,
       viewportSize: drawArea.size,
+      effectiveRenderScale:
+          (view.renderScale ?? _renderScale) * adaptiveRenderScale,
       pool: surface.transientTexturePool(viewIndex),
       environmentMap: environmentMap,
       transientsBuffer: transientsBuffer,
@@ -2630,11 +2660,11 @@ base class Scene implements SceneGraph {
     );
     try {
       render();
-    } on Fsr1Exception catch (error) {
+    } on UpscalingException catch (error) {
       if (!dimensions.upscaling) rethrow;
       // A driver/allocation failure must leave a usable legacy frame. Keep
       // already-submitted transients alive; acquire a separate size's pool.
-      Fsr1Resources.disable(error);
+      _disableUpscaler(error);
       outputSize = pixelSize;
       swapchainColor = surface.getNextSwapchainColorTexture(
         pixelSize,
@@ -2645,7 +2675,7 @@ base class Scene implements SceneGraph {
     }
     if (captureThisView && capturer == null) {
       pendingCapture.completer.completeError(
-        StateError('FSR frame failed; retry capture of fallback'),
+        StateError('Upscaling frame failed; retry capture of fallback'),
       );
     }
     if (capturer != null) {
@@ -2894,6 +2924,7 @@ base class Scene implements SceneGraph {
     // (see CameraProjection.getProjectionMatrixForViewport). Defaults to
     // [pixelSize] for views with no logical size (render textures, probes).
     ui.Size? viewportSize,
+    double effectiveRenderScale = 1,
     required TransientTexturePool pool,
     required EnvironmentMap environmentMap,
     required TransientWriter transientsBuffer,
@@ -2921,7 +2952,7 @@ base class Scene implements SceneGraph {
     if (capturer != null) {
       pool = ObservedTexturePool(pool, capturer);
     }
-    final fsrActive =
+    final upscalingActive =
         !captureLinearColor &&
         (outputColor.width != pixelSize.width.toInt() ||
             outputColor.height != pixelSize.height.toInt());
@@ -2932,6 +2963,7 @@ base class Scene implements SceneGraph {
       outputWidth: outputColor.width,
       outputHeight: outputColor.height,
       offscreen: viewIndex < 0,
+      renderScale: effectiveRenderScale,
     );
     final viewWatch = viewStats == null ? null : (Stopwatch()..start());
     // Bound to the logical size so every pass renders the volume picking
@@ -3566,7 +3598,7 @@ base class Scene implements SceneGraph {
     for (final effect in postProcess.customEffects) {
       if (!effect.enabled ||
           debugActive ||
-          (fsrActive && effect.bypassWhenUpscaling)) {
+          (upscalingActive && effect.bypassWhenUpscaling)) {
         continue;
       }
       if (effect.insertion == PostInsertion.beforeTonemap) {
@@ -3889,7 +3921,7 @@ base class Scene implements SceneGraph {
 
     for (var i = 0; i < displaySteps.length; i++) {
       final isLast = i == displaySteps.length - 1;
-      final output = isLast && !fsrActive
+      final output = isLast && !upscalingActive
           ? outputColor
           : pool.acquire(
               TransientTextureDescriptor.color(
@@ -3901,7 +3933,9 @@ base class Scene implements SceneGraph {
             );
       graph.addPass(displaySteps[i](output));
     }
-    if (fsrActive) {
+    if (upscalingActive && _upscaling == SceneUpscaling.sgsr1) {
+      graph.addPass(Sgsr1Pass(output: outputColor));
+    } else if (upscalingActive) {
       gpu.Texture reconstructed;
       try {
         reconstructed = pool.acquire(

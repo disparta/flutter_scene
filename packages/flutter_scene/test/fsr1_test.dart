@@ -41,6 +41,27 @@ void main() {
       }
     },
   );
+  test('SGSR shares size policy, native bypass and unavailable fallback', () {
+    for (final logical in [
+      const Size(800, 450),
+      const Size(391, 853),
+      Size.zero,
+    ]) {
+      for (final scale in [.5, .7, .99999, 1.0, 1.25]) {
+        for (final available in [true, false]) {
+          final fsr = size(scale, logical: logical, available: available);
+          final sgsr = size(
+            scale,
+            logical: logical,
+            available: available,
+            mode: SceneUpscaling.sgsr1,
+          );
+          expect(sgsr.internal, fsr.internal);
+          expect(sgsr.output, fsr.output);
+        }
+      }
+    }
+  });
   test('disabled adaptive frames retain original resolution rounding', () {
     const logical = Size(391, 853);
     for (final dpr in [1.0, 1.25, 2.0, 3.0]) {

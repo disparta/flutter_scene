@@ -1,0 +1,4 @@
+{
+  "SgsrVertex": {"type": "vertex", "file": "shaders/flutter_scene_fullscreen.vert"},
+  "SgsrFragment": {"type": "fragment", "file": "shaders/flutter_scene_sgsr1.frag"}
+}

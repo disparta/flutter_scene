@@ -9,6 +9,7 @@ import '../scene_encoder.dart' show resolvePipeline;
 import 'frame_transients.dart';
 import 'render_graph.dart';
 import 'resolve_pass.dart';
+import 'scene_upscaling.dart';
 
 /// Lazy, optional resources: failure is sticky and reported once per process.
 class Fsr1Resources {
@@ -183,9 +184,8 @@ class Fsr1Pass extends RenderGraphPass {
 }
 
 /// Distinguishes optional-upscaler failures from unrelated scene errors.
-class Fsr1Exception implements Exception {
-  Fsr1Exception(this.cause);
-  final Object cause;
+class Fsr1Exception extends UpscalingException {
+  Fsr1Exception(super.cause);
   @override
   String toString() => 'FSR 1: $cause';
 }

@@ -2,7 +2,7 @@ import 'dart:ui' show Size;
 
 /// Spatial reconstruction of reduced screen views, after display colour/AA.
 /// Native and supersampled views, and offscreen render textures, bypass it.
-enum SceneUpscaling { none, fsr1 }
+enum SceneUpscaling { none, fsr1, sgsr1 }
 
 /// Frame dimensions shared by rendering, pacing, and allocation.
 class SceneFrameSize {
@@ -33,10 +33,18 @@ class SceneFrameSize {
         internal != display;
     return SceneFrameSize(
       internal,
-      mode == SceneUpscaling.fsr1 && available && reduced ? display : internal,
+      mode != SceneUpscaling.none && available && reduced ? display : internal,
     );
   }
   final Size internal;
   final Size output;
   bool get upscaling => internal != output;
+}
+
+/// Optional reconstruction failure; the scene retries the legacy display chain.
+class UpscalingException implements Exception {
+  UpscalingException(this.cause);
+  final Object cause;
+  @override
+  String toString() => 'Scene upscaling: $cause';
 }
