@@ -149,12 +149,17 @@ class RenderViewStats {
     required this.width,
     required this.height,
     required this.offscreen,
-  });
+    int? outputWidth,
+    int? outputHeight,
+  }) : outputWidth = outputWidth ?? width,
+       outputHeight = outputHeight ?? height;
 
   /// The screen view index, or -1 for a render-texture view.
   final int viewIndex;
   final int width;
   final int height;
+  final int outputWidth;
+  final int outputHeight;
 
   /// True for a render-texture view (not composited to the canvas).
   final bool offscreen;
@@ -169,6 +174,8 @@ class RenderViewStats {
     'viewIndex': viewIndex,
     'width': width,
     'height': height,
+    'outputWidth': outputWidth,
+    'outputHeight': outputHeight,
     'offscreen': offscreen,
     'cpuMicros': cpuMicros,
     'counters': counters.toJson(),
@@ -286,6 +293,8 @@ class RenderStats {
     required int width,
     required int height,
     required bool offscreen,
+    int? outputWidth,
+    int? outputHeight,
   }) {
     final frame = _active;
     if (frame == null) return null;
@@ -294,6 +303,8 @@ class RenderStats {
       width: width,
       height: height,
       offscreen: offscreen,
+      outputWidth: outputWidth,
+      outputHeight: outputHeight,
     );
     frame.views.add(view);
     return view;

@@ -7,6 +7,12 @@ import 'package:flutter_scene/src/gpu/gpu.dart' as gpu;
 import 'package:flutter_scene/src/render/transients_execution_native.dart'
     if (dart.library.js_interop) 'package:flutter_scene/src/render/transients_execution_web.dart';
 
+// Current Flutter GPU reports a bool; the web shim and older SDKs report
+// a CompletionStatus enum. Keep this adaptation independent of either type.
+@visibleForTesting
+bool gpuSubmissionSucceeded(Object status) =>
+    status is bool ? status : status is Enum && status.name == 'successful';
+
 /// Tracks GPU completion of command buffers submitted by the renderer.
 ///
 /// Submissions are recorded with monotonically increasing ids and marked
@@ -58,10 +64,18 @@ class GpuSubmissionTracker {
   }
 
   /// Submits [commandBuffer] and records it for completion tracking.
-  void submit(gpu.CommandBuffer commandBuffer) {
+  void submit(
+    gpu.CommandBuffer commandBuffer, {
+    void Function(bool)? onComplete,
+  }) {
     final int id = record();
     try {
-      commandBuffer.submit(completionCallback: (_) => complete(id));
+      commandBuffer.submit(
+        completionCallback: (success) {
+          complete(id);
+          onComplete?.call(gpuSubmissionSucceeded(success));
+        },
+      );
     } catch (_) {
       // A submission that never reaches the GPU never completes, and a
       // pending id would hold framesInFlight up for good.

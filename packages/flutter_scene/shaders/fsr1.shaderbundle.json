@@ -1,0 +1,14 @@
+{
+  "FsrVertex": {
+    "type": "vertex",
+    "file": "shaders/flutter_scene_fullscreen.vert"
+  },
+  "FsrEasuFragment": {
+    "type": "fragment",
+    "file": "shaders/flutter_scene_fsr_easu.frag"
+  },
+  "FsrRcasFragment": {
+    "type": "fragment",
+    "file": "shaders/flutter_scene_fsr_rcas.frag"
+  }
+}

@@ -71,7 +71,12 @@ class Surface {
     Size size, [
     int viewIndex = 0,
     gpu.PixelFormat? format,
-  ]) => _view(viewIndex).nextSwapchainColor(size, format);
+    Size? internalSize,
+  ]) => _view(viewIndex).nextSwapchainColor(size, format, internalSize);
+
+  @internal
+  Size? lastInternalSize([int viewIndex = 0]) =>
+      _view(viewIndex)._lastInternalSize;
 
   /// The color texture most recently issued for [viewIndex] (the previous
   /// frame's output once the next frame begins), or null before the first
@@ -154,7 +159,9 @@ class Surface {
 /// One output size's render targets: the swapchain color ring and the
 /// transient texture pool.
 class _SizedTargets {
-  _SizedTargets(this.size, this.format);
+  _SizedTargets(this.size, this.format, this.internalSize);
+
+  final Size internalSize;
 
   final Size size;
   final gpu.PixelFormat? format;
@@ -181,9 +188,10 @@ class _ViewSurface {
   final List<_SizedTargets> _sizes = [];
   int _frame = 0;
   gpu.Texture? _lastIssued;
+  Size? _lastInternalSize;
 
   _SizedTargets get _current {
-    if (_sizes.isEmpty) _sizes.add(_SizedTargets(Size.zero, null));
+    if (_sizes.isEmpty) _sizes.add(_SizedTargets(Size.zero, null, Size.zero));
     return _sizes.last;
   }
 
@@ -209,16 +217,29 @@ class _ViewSurface {
     return bytes;
   }
 
-  gpu.Texture nextSwapchainColor(Size size, [gpu.PixelFormat? format]) {
+  gpu.Texture nextSwapchainColor(
+    Size size, [
+    gpu.PixelFormat? format,
+    Size? internalSize,
+  ]) {
+    internalSize ??= size;
     _frame++;
     var sized = _sizes.isEmpty ? null : _sizes.last;
-    if (sized == null || sized.size != size || sized.format != format) {
+    if (sized == null ||
+        sized.size != size ||
+        sized.format != format ||
+        sized.internalSize != internalSize) {
       // Another size's previous output is the wrong size to sample.
       _lastIssued = null;
       final index = _sizes.indexWhere(
-        (s) => s.size == size && s.format == format,
+        (s) =>
+            s.size == size &&
+            s.format == format &&
+            s.internalSize == internalSize,
       );
-      sized = index < 0 ? _SizedTargets(size, format) : _sizes.removeAt(index);
+      sized = index < 0
+          ? _SizedTargets(size, format, internalSize)
+          : _sizes.removeAt(index);
       _sizes.add(sized);
       while (_sizes.length > _keptSizes) {
         _sizes.removeAt(0);
@@ -243,6 +264,7 @@ class _ViewSurface {
     final result = colors[sized.cursor];
     sized.cursor = (sized.cursor + 1) % Surface._maxFramesInFlight;
     _lastIssued = result;
+    _lastInternalSize = internalSize;
     return result;
   }
 }
