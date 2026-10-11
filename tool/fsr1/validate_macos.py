@@ -43,6 +43,11 @@ with tempfile.TemporaryDirectory(prefix='fsr-conformance-') as directory:
         # CGL supports desktop 4.1. Remove ES precision/interface decorations;
         # retain all generated shader arithmetic and texture instructions.
         text = out.read_text().replace('#version 310 es','#version 410 core')
+        if index == 0:
+            reads = text.count('texelFetch(')
+            assert reads <= 16, f'EASU RGB samples duplicated: {reads} texel reads'
+            assert 'textureGather(' not in text
+            print('Portable EASU texel reads:', reads, flush=True)
         text = re.sub(r'precision \w+ \w+;','',text)
         text = re.sub(r'\b(highp|mediump|lowp)\b','',text)
         text = re.sub(r'layout\(binding = \d+, std140\)', 'layout(std140)',text)

@@ -22,17 +22,21 @@ vec4 loadPixel(ivec2 p) {
 #define FSR_EASU_F 1
 #include "ffx_fsr1.h"
 // GLSL gather order is bottom-left, bottom-right, top-right, top-left.
-// The reference's three gathers per channel are reproduced with explicit
-// level-zero texels, so GLES 3.0 does not need texture-gather extensions.
-vec4 gatherChannel(vec2 uv, int channel) {
+// The pinned reference calls R, G, then B for each of its four gather groups.
+// Cache full RGBA texels in R and reuse them in G/B: relying on driver CSE
+// produced 37 texture reads per output pixel on the original portable path.
+// Unused lanes in the first/last group are removed by the shader compiler.
+vec4 gather0, gather1, gather2, gather3;
+void cacheGather(vec2 uv) {
   ivec2 p = ivec2(floor(uv * fsr.input_size - 0.5));
-  return vec4(loadPixel(p+ivec2(0,1))[channel],
-              loadPixel(p+ivec2(1,1))[channel],
-              loadPixel(p+ivec2(1,0))[channel], loadPixel(p)[channel]);
+  gather0 = loadPixel(p+ivec2(0,1));
+  gather1 = loadPixel(p+ivec2(1,1));
+  gather2 = loadPixel(p+ivec2(1,0));
+  gather3 = loadPixel(p);
 }
-AF4 FsrEasuRF(AF2 p) { return gatherChannel(p, 0); }
-AF4 FsrEasuGF(AF2 p) { return gatherChannel(p, 1); }
-AF4 FsrEasuBF(AF2 p) { return gatherChannel(p, 2); }
+AF4 FsrEasuRF(AF2 p) { cacheGather(p); return vec4(gather0.r,gather1.r,gather2.r,gather3.r); }
+AF4 FsrEasuGF(AF2 p) { return vec4(gather0.g,gather1.g,gather2.g,gather3.g); }
+AF4 FsrEasuBF(AF2 p) { return vec4(gather0.b,gather1.b,gather2.b,gather3.b); }
 void main() {
   uvec4 c0, c1, c2, c3;
   FsrEasuCon(c0,c1,c2,c3, fsr.input_size.x,fsr.input_size.y,

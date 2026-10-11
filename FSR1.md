@@ -79,3 +79,10 @@ The RCAS comparison also uses AMD's reference constant setup at 0.5 stops.
 On Apple M4 Pro the maximum EASU reference error was 2.98e-7 per channel;
 after RCAS it was 5.37e-7.
 This is shader correctness evidence, not a Windows/Linux/Android performance result.
+
+The portable EASU callbacks share each RGBA texel across the reference's R/G/B
+callbacks (which are ordered by the pinned AMD header). This reduces the
+compiled GLES shader from 37 to 13 texel reads without changing reference
+output. The conformance tool checks the compiled read count as well as pixels.
+This optimization was prompted by Pixel 6 thermal/performance testing; target
+hardware acceptance remains the application's release responsibility.
