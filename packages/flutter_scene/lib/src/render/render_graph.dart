@@ -279,7 +279,6 @@ class TransientTexturePool {
     );
     var texture = ring[_frame];
     if (texture == null) {
-      texturesCreated++;
       texture = gpu.gpuContext.createTexture(
         descriptor.storageMode,
         descriptor.width,
@@ -289,6 +288,7 @@ class TransientTexturePool {
         enableRenderTargetUsage: true,
         enableShaderReadUsage: descriptor.enableShaderReadUsage,
       );
+      texturesCreated++;
       ring[_frame] = texture;
     }
     return texture;

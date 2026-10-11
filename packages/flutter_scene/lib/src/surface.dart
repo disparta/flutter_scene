@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_scene/src/gpu/gpu.dart' as gpu;
 
 import 'package:flutter_scene/src/render/render_graph.dart';
+import 'texture/texture_registry.dart' show gpuTextureBytes;
 
 /// Manages the swapchain color textures a [Scene] composites onto the
 /// Flutter canvas, plus the pools of transient render-graph attachments.
@@ -105,6 +106,24 @@ class Surface {
     var bytes = 0;
     _forEachLive((surface) => bytes += surface.transientBytes);
     return bytes;
+  }
+
+  /// Presentation texture residency is separate from transient attachments:
+  /// single-pass upscalers can increase it without adding a pooled target.
+  @internal
+  static ({int bytes, int count}) get livePresentationTextures {
+    var bytes = 0, count = 0;
+    _forEachLive((surface) {
+      for (final view in surface._views) {
+        for (final sized in view._sizes) {
+          for (final texture in sized.swapchainColors) {
+            bytes += gpuTextureBytes(texture);
+            count++;
+          }
+        }
+      }
+    });
+    return (bytes: bytes, count: count);
   }
 
   /// Drops every transient attachment this surface's views hold and returns

@@ -85,6 +85,12 @@ void main() {
     expect(names.indexOf('FxaaPass'), lessThan(names.indexOf('Sgsr1Pass')));
     expect(names, isNot(contains('PostEffectPass')));
     expect(scene.surface.lastSwapchainColorTexture()!.width, 192);
+    expect(
+      takeMemoryReport().categories
+          .firstWhere((c) => c.name == 'presentation textures')
+          .bytes,
+      greaterThanOrEqualTo(192 * 128 * 4),
+    );
     draw();
     draw();
     final allocated = TransientTexturePool.texturesCreated;
