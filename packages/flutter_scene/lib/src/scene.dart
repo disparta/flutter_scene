@@ -58,7 +58,6 @@ import 'render/auto_exposure_pass.dart';
 import 'render/bloom_pass.dart';
 import 'render/custom_render_pass.dart';
 import 'render/fsr1_pass.dart';
-import 'render/sgsr1_pass.dart';
 import 'render/scene_upscaling.dart';
 import 'render/depth_prepass.dart';
 import 'render/fxaa_pass.dart';
@@ -339,18 +338,12 @@ base class Scene implements SceneGraph {
   set upscaling(SceneUpscaling value) {
     _upscaling = value;
     if (value == SceneUpscaling.fsr1) Fsr1Resources.initialize().ignore();
-    if (value == SceneUpscaling.sgsr1) Sgsr1Resources.initialize().ignore();
   }
 
   /// Optional initialization; never affects the base renderer on failure.
   static Future<bool> initializeFsr1Resources() => Fsr1Resources.initialize();
   static bool get fsr1Available => Fsr1Resources.available;
   static Object? get fsr1Failure => Fsr1Resources.failure;
-
-  /// Optional SGSR 1 capability probe; independent of FSR readiness/failure.
-  static Future<bool> initializeSgsr1Resources() => Sgsr1Resources.initialize();
-  static bool get sgsr1Available => Sgsr1Resources.available;
-  static Object? get sgsr1Failure => Sgsr1Resources.failure;
 
   /// Process-wide transient allocation count, for steady-state profiling.
   static int get transientTexturesCreated =>
@@ -359,15 +352,12 @@ base class Scene implements SceneGraph {
   bool get _upscalerAvailable => switch (_upscaling) {
     SceneUpscaling.none => false,
     SceneUpscaling.fsr1 => Fsr1Resources.available,
-    SceneUpscaling.sgsr1 => Sgsr1Resources.available,
   };
 
   void _disableUpscaler(Object error) {
     switch (_upscaling) {
       case SceneUpscaling.fsr1:
         Fsr1Resources.disable(error);
-      case SceneUpscaling.sgsr1:
-        Sgsr1Resources.disable(error);
       case SceneUpscaling.none:
         break;
     }
@@ -3933,9 +3923,7 @@ base class Scene implements SceneGraph {
             );
       graph.addPass(displaySteps[i](output));
     }
-    if (upscalingActive && _upscaling == SceneUpscaling.sgsr1) {
-      graph.addPass(Sgsr1Pass(output: outputColor));
-    } else if (upscalingActive) {
+    if (upscalingActive) {
       gpu.Texture reconstructed;
       try {
         reconstructed = pool.acquire(

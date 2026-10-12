@@ -1,4 +1,7 @@
 // Metal is a portability smoke test; target-hardware acceptance is separate.
+// Pool reuse is intentionally inspected by this renderer integration test.
+// ignore_for_file: invalid_use_of_internal_member
+
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -83,6 +86,12 @@ void main() {
     expect(names.indexOf('FxaaPass'), lessThan(names.indexOf('FsrEasuPass')));
     expect(names, isNot(contains('PostEffectPass')));
     expect(scene.surface.lastSwapchainColorTexture()!.width, 192);
+    expect(
+      takeMemoryReport().categories
+          .firstWhere((c) => c.name == 'presentation textures')
+          .bytes,
+      greaterThanOrEqualTo(192 * 128 * 4),
+    );
     draw();
     draw();
     final allocated = TransientTexturePool.texturesCreated;

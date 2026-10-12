@@ -2,7 +2,7 @@ import 'dart:ui' show Size;
 
 /// Spatial reconstruction of reduced screen views, after display colour/AA.
 /// Native and supersampled views, and offscreen render textures, bypass it.
-enum SceneUpscaling { none, fsr1, sgsr1 }
+enum SceneUpscaling { none, fsr1 }
 
 /// Frame dimensions shared by rendering, pacing, and allocation.
 class SceneFrameSize {

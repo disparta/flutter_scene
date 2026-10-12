@@ -78,12 +78,6 @@ Future<void> _build({
     sourceRoot: root,
     name: 'fsr1',
   );
-  await _buildEngineShaderBundle(
-    buildInput: buildInput,
-    buildOutput: buildOutput,
-    sourceRoot: root,
-    name: 'sgsr1',
-  );
   await buildBundledPhysicalMaterials(
     buildInput: buildInput,
     buildOutput: buildOutput,
