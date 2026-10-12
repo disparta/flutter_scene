@@ -57,8 +57,6 @@ import 'post_process/post_process.dart';
 import 'render/auto_exposure_pass.dart';
 import 'render/bloom_pass.dart';
 import 'render/custom_render_pass.dart';
-import 'render/fsr1_pass.dart';
-import 'render/scene_upscaling.dart';
 import 'render/depth_prepass.dart';
 import 'render/fxaa_pass.dart';
 import 'render/scene_color_blit_pass.dart';
@@ -330,38 +328,9 @@ base class Scene implements SceneGraph {
         gpu.gpuContext.doesSupportOffscreenMSAA;
   }
 
-  SceneUpscaling _upscaling = SceneUpscaling.none;
-
-  /// Opt-in reconstruction of reduced screen views; defaults to none.
-  /// Requesting an upscaler starts optional initialization without blocking rendering.
-  SceneUpscaling get upscaling => _upscaling;
-  set upscaling(SceneUpscaling value) {
-    _upscaling = value;
-    if (value == SceneUpscaling.fsr1) Fsr1Resources.initialize().ignore();
-  }
-
-  /// Optional initialization; never affects the base renderer on failure.
-  static Future<bool> initializeFsr1Resources() => Fsr1Resources.initialize();
-  static bool get fsr1Available => Fsr1Resources.available;
-  static Object? get fsr1Failure => Fsr1Resources.failure;
-
   /// Process-wide transient allocation count, for steady-state profiling.
   static int get transientTexturesCreated =>
       TransientTexturePool.texturesCreated;
-
-  bool get _upscalerAvailable => switch (_upscaling) {
-    SceneUpscaling.none => false,
-    SceneUpscaling.fsr1 => Fsr1Resources.available,
-  };
-
-  void _disableUpscaler(Object error) {
-    switch (_upscaling) {
-      case SceneUpscaling.fsr1:
-        Fsr1Resources.disable(error);
-      case SceneUpscaling.none:
-        break;
-    }
-  }
 
   double _renderScale = 1.0;
 
@@ -2564,16 +2533,12 @@ base class Scene implements SceneGraph {
     // high-DPI devices). See: https://github.com/bdero/flutter_scene/issues/60
     // The render scale multiplies on top, trading resolution for fragment
     // work (or supersampling above 1.0).
-    final dimensions = SceneFrameSize.resolve(
-      logical: drawArea.size,
-      dpr: dpr,
-      scale: view.renderScale ?? _renderScale,
-      adaptiveScale: adaptiveRenderScale,
-      mode: _upscaling,
-      available: _upscalerAvailable,
+    final scale =
+        dpr * (view.renderScale ?? _renderScale) * adaptiveRenderScale;
+    final pixelSize = ui.Size(
+      (drawArea.width * scale).ceilToDouble(),
+      (drawArea.height * scale).ceilToDouble(),
     );
-    final pixelSize = dimensions.internal;
-    var outputSize = dimensions.output;
     if (pixelSize.width < 1 || pixelSize.height < 1) {
       return;
     }
@@ -2589,18 +2554,12 @@ base class Scene implements SceneGraph {
     if (!captureThisView &&
         maxGpuFramesInFlight > 0 &&
         previous != null &&
-        previous.width == outputSize.width.toInt() &&
-        previous.height == outputSize.height.toInt() &&
-        surface.lastInternalSize(viewIndex) == pixelSize &&
+        previous.width == pixelSize.width.toInt() &&
+        previous.height == pixelSize.height.toInt() &&
         rendererSubmissions.framesInFlight >= maxGpuFramesInFlight) {
       _pacedFrameCount++;
       _holdPace();
-      final srcRect = ui.Rect.fromLTWH(
-        0,
-        0,
-        outputSize.width,
-        outputSize.height,
-      );
+      final srcRect = ui.Rect.fromLTWH(0, 0, pixelSize.width, pixelSize.height);
       final paint = ui.Paint()
         ..filterQuality = view.filterQuality ?? filterQuality;
       canvas.drawImageRect(previous.asImage(), srcRect, drawArea, paint);
@@ -2613,24 +2572,11 @@ base class Scene implements SceneGraph {
       _pendingGraphCapture = null;
       capturer = RenderGraphCapturer(request: pendingCapture.request);
     }
-    gpu.Texture swapchainColor;
-    try {
-      swapchainColor = surface.getNextSwapchainColorTexture(
-        outputSize,
-        viewIndex,
-        null,
-        pixelSize,
-      );
-    } catch (error) {
-      if (!dimensions.upscaling) rethrow;
-      _disableUpscaler(error);
-      outputSize = pixelSize;
-      swapchainColor = surface.getNextSwapchainColorTexture(
-        pixelSize,
-        viewIndex,
-      );
-    }
-    void render() => _renderViewToTexture(
+    final gpu.Texture swapchainColor = surface.getNextSwapchainColorTexture(
+      pixelSize,
+      viewIndex,
+    );
+    _renderViewToTexture(
       view: view,
       outputColor: swapchainColor,
       pixelSize: pixelSize,
@@ -2648,39 +2594,17 @@ base class Scene implements SceneGraph {
       viewIndex: viewIndex,
       capturePlanarReflections: capturePlanarReflections,
     );
-    try {
-      render();
-    } on UpscalingException catch (error) {
-      if (!dimensions.upscaling) rethrow;
-      // A driver/allocation failure must leave a usable legacy frame. Keep
-      // already-submitted transients alive; acquire a separate size's pool.
-      _disableUpscaler(error);
-      outputSize = pixelSize;
-      swapchainColor = surface.getNextSwapchainColorTexture(
-        pixelSize,
-        viewIndex,
-      );
-      capturer = null;
-      render();
-    }
-    if (captureThisView && capturer == null) {
-      pendingCapture.completer.completeError(
-        StateError('Upscaling frame failed; retry capture of fallback'),
-      );
-    }
     if (capturer != null) {
       pendingCapture!.completer.complete(
         capturer.finish(
           pixelWidth: pixelSize.width.toInt(),
           pixelHeight: pixelSize.height.toInt(),
-          outputWidth: outputSize.width.toInt(),
-          outputHeight: outputSize.height.toInt(),
         ),
       );
     }
 
     final image = swapchainColor.asImage();
-    final srcRect = ui.Rect.fromLTWH(0, 0, outputSize.width, outputSize.height);
+    final srcRect = ui.Rect.fromLTWH(0, 0, pixelSize.width, pixelSize.height);
     final paint = ui.Paint()
       ..filterQuality = view.filterQuality ?? filterQuality;
     canvas.drawImageRect(image, srcRect, drawArea, paint);
@@ -2942,10 +2866,6 @@ base class Scene implements SceneGraph {
     if (capturer != null) {
       pool = ObservedTexturePool(pool, capturer);
     }
-    final upscalingActive =
-        !captureLinearColor &&
-        (outputColor.width != pixelSize.width.toInt() ||
-            outputColor.height != pixelSize.height.toInt());
     final viewStats = renderStats.beginView(
       viewIndex: viewIndex,
       width: pixelSize.width.toInt(),
@@ -3586,9 +3506,7 @@ base class Scene implements SceneGraph {
     final beforeTonemap = <PostEffect>[];
     final afterTonemap = <PostEffect>[];
     for (final effect in postProcess.customEffects) {
-      if (!effect.enabled ||
-          debugActive ||
-          (upscalingActive && effect.bypassWhenUpscaling)) {
+      if (!effect.enabled || debugActive) {
         continue;
       }
       if (effect.insertion == PostInsertion.beforeTonemap) {
@@ -3911,7 +3829,7 @@ base class Scene implements SceneGraph {
 
     for (var i = 0; i < displaySteps.length; i++) {
       final isLast = i == displaySteps.length - 1;
-      final output = isLast && !upscalingActive
+      final output = isLast
           ? outputColor
           : pool.acquire(
               TransientTextureDescriptor.color(
@@ -3922,23 +3840,6 @@ base class Scene implements SceneGraph {
               ),
             );
       graph.addPass(displaySteps[i](output));
-    }
-    if (upscalingActive) {
-      gpu.Texture reconstructed;
-      try {
-        reconstructed = pool.acquire(
-          TransientTextureDescriptor.color(
-            width: outputColor.width,
-            height: outputColor.height,
-            format: outputColor.format,
-            debugName: 'fsr_easu',
-          ),
-        );
-      } catch (error) {
-        throw Fsr1Exception(error);
-      }
-      graph.addPass(Fsr1Pass(output: reconstructed, sharpen: false));
-      graph.addPass(Fsr1Pass(output: outputColor, sharpen: true));
     }
 
     graph.execute(

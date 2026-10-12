@@ -31,6 +31,9 @@ import 'generated_tree.dart';
 /// The package flutter_scene's engine assets are recorded as belonging to.
 const String _engineOwner = 'flutter_scene';
 
+/// The manifest of the engine's shader bundle, relative to flutter_scene's root.
+const String _baseBundleManifest = 'shaders/base.shaderbundle.json';
+
 /// GLSL ES 3.00 for the OpenGL ES dialect. The radiance sampling uses
 /// textureLod, which is core in 300 es; the 1.00 form needs
 /// GL_EXT_shader_texture_lod, which software GL stacks (Mesa llvmpipe, Android
@@ -67,16 +70,10 @@ Future<void> _build({
   required BuildOutputBuilder buildOutput,
 }) async {
   final root = await _flutterSceneRoot();
-  await _buildEngineShaderBundle(
+  await _buildBaseShaderBundle(
     buildInput: buildInput,
     buildOutput: buildOutput,
     sourceRoot: root,
-  );
-  await _buildEngineShaderBundle(
-    buildInput: buildInput,
-    buildOutput: buildOutput,
-    sourceRoot: root,
-    name: 'fsr1',
   );
   await buildBundledPhysicalMaterials(
     buildInput: buildInput,
@@ -103,16 +100,13 @@ Future<Uri> _flutterSceneRoot() async {
   return lib.resolve('../');
 }
 
-Future<void> _buildEngineShaderBundle({
+Future<void> _buildBaseShaderBundle({
   required BuildInput buildInput,
   required BuildOutputBuilder buildOutput,
   required Uri sourceRoot,
-  String name = 'base',
 }) async {
   final shaders = sourceRoot.resolve('shaders/');
-  final manifestFile = File.fromUri(
-    sourceRoot.resolve('shaders/$name.shaderbundle.json'),
-  );
+  final manifestFile = File.fromUri(sourceRoot.resolve(_baseBundleManifest));
   if (!manifestFile.existsSync()) {
     throw Exception(
       'flutter_scene: the engine shader manifest is missing at '
@@ -134,7 +128,7 @@ Future<void> _buildEngineShaderBundle({
 
   final options = HookOptions.of(buildInput);
   final stampBuffer = StringBuffer(
-    await shaderBundleStamp(buildInput, 'engine bundle=$name'),
+    await shaderBundleStamp(buildInput, 'engine bundle=base'),
   );
   for (final file in sources) {
     stampBuffer.write(
@@ -157,18 +151,18 @@ Future<void> _buildEngineShaderBundle({
   final target = shaderBundleTargetKey(buildInput);
   final outputUri = tree.fileUri(
     GeneratedAssetFamily.shaderBundle,
-    nameId: name,
+    nameId: 'base',
     extension: '.shaderbundle',
     variant: await engineIdentity(),
     target: target,
   );
-  if (tree.isFresh(GeneratedAssetFamily.shaderBundle, name, stamp, [
+  if (tree.isFresh(GeneratedAssetFamily.shaderBundle, 'base', stamp, [
     outputUri,
   ], target: target)) {
     tree
       ..recordFile(
         family: GeneratedAssetFamily.shaderBundle,
-        id: name,
+        id: 'base',
         uri: outputUri,
         stamp: stamp,
         owner: _engineOwner,
@@ -182,7 +176,7 @@ Future<void> _buildEngineShaderBundle({
   // directory, the building package's root. That is flutter_scene's own root
   // for its own hook; an app's hook building these needs the entries rebased to
   // absolute paths first.
-  var manifestPath = 'shaders/$name.shaderbundle.json';
+  var manifestPath = _baseBundleManifest;
   if (buildInput.packageRoot != sourceRoot) {
     final rebased = rebaseShaderBundleManifest(
       (jsonDecode(manifestFile.readAsStringSync()) as Map)
@@ -190,7 +184,7 @@ Future<void> _buildEngineShaderBundle({
       sourceRoot,
       packageRoot: buildInput.packageRoot,
     );
-    manifestPath = 'build/flutter_scene_engine/$name.shaderbundle.json';
+    manifestPath = 'build/flutter_scene_engine/base.shaderbundle.json';
     final rebasedFile = File.fromUri(
       buildInput.packageRoot.resolve(manifestPath),
     );
@@ -203,7 +197,7 @@ Future<void> _buildEngineShaderBundle({
     );
   }
 
-  stdout.writeln('flutter_scene: compiling the $name shader bundle');
+  stdout.writeln('flutter_scene: compiling the engine shader bundle');
   await buildTargetShaderBundleJson(
     buildInput: buildInput,
     buildOutput: buildOutput,

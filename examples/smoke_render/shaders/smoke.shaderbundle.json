@@ -11,8 +11,8 @@
         "type": "fragment",
         "file": "shaders/view_edges.frag"
     },
-    "FsrLegacyProbeFragment": {
+    "DisplayProbeFragment": {
         "type": "fragment",
-        "file": "shaders/fsr_legacy_probe.frag"
+        "file": "shaders/display_probe.frag"
     }
 }

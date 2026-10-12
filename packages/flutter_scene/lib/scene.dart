@@ -406,5 +406,3 @@ export 'src/widgets/scene_view.dart'
         SceneView,
         SceneViewsBuilder;
 export 'src/tone_mapping.dart' show ToneMappingMode;
-
-export 'src/render/scene_upscaling.dart' show SceneUpscaling;

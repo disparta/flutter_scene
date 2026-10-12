@@ -3,7 +3,6 @@
 // ignore_for_file: invalid_use_of_internal_member
 
 import 'dart:ui' as ui;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart';
 import 'package:flutter_scene/gpu.dart' as gpu;
@@ -11,26 +10,18 @@ import 'package:flutter_scene/gpu.dart' as gpu;
 import 'package:flutter_scene/src/render/frame_transients.dart';
 // ignore: implementation_imports
 import 'package:flutter_scene/src/render/render_graph.dart';
-// ignore: implementation_imports
-import 'package:flutter_scene/src/render/fsr1_pass.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:smoke_render/smoke_scenes.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  testWidgets('FSR graph, presentation, resizing, reuse and fallback', (
+  testWidgets('scaled presentation, post effects, resizing, reuse and pacing', (
     tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: SizedBox.expand()));
     await tester.pump();
     await Scene.initializeStaticResources();
-    expect(Scene.fsr1Available, isFalse);
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final ready = await Scene.initializeFsr1Resources();
-    debugDefaultTargetPlatformOverride = null;
-    expect(ready, isTrue, reason: '${Scene.fsr1Failure}');
     final setup = kSmokeScenes.first.setup();
     final scene = setup.scene
       ..renderScale = .5
@@ -40,13 +31,11 @@ void main() {
     final library = await gpu.loadShaderLibraryAsync(
       await gpu.resolveShaderBundleKey('smoke'),
     );
-    final legacy = PostEffect(
+    final displayEffect = PostEffect(
       insertion: PostInsertion.afterTonemap,
-      fragmentShader: library!['FsrLegacyProbeFragment']!,
-      bypassWhenUpscaling: true,
+      fragmentShader: library!['DisplayProbeFragment']!,
     );
-    scene.postProcess.customEffects.add(legacy);
-    scene.upscaling = SceneUpscaling.fsr1;
+    scene.postProcess.customEffects.add(displayEffect);
     Scene.debugAllowRenderGraphCapture = true;
     addTearDown(() => Scene.debugAllowRenderGraphCapture = false);
     void draw({double dpr = 2, double width = 96}) {
@@ -79,18 +68,16 @@ void main() {
         frame.outputWidth,
         frame.outputHeight,
       ],
-      [96, 64, 192, 128],
+      [96, 64, 96, 64],
     );
     final names = frame.passes.map((p) => p.name).toList();
-    expect(names.sublist(names.length - 2), ['FsrEasuPass', 'FsrRcasPass']);
-    expect(names.indexOf('FxaaPass'), lessThan(names.indexOf('FsrEasuPass')));
-    expect(names, isNot(contains('PostEffectPass')));
-    expect(scene.surface.lastSwapchainColorTexture()!.width, 192);
+    expect(names.sublist(names.length - 2), ['FxaaPass', 'PostEffectPass']);
+    expect(scene.surface.lastSwapchainColorTexture()!.width, 96);
     expect(
       takeMemoryReport().categories
           .firstWhere((c) => c.name == 'presentation textures')
           .bytes,
-      greaterThanOrEqualTo(192 * 128 * 4),
+      greaterThanOrEqualTo(96 * 64 * 4),
     );
     draw();
     draw();
@@ -102,14 +89,14 @@ void main() {
     scene.renderScale = .7;
     draw();
     expect(identical(poolA, scene.surface.transientTexturePool()), isFalse);
-    expect(scene.surface.lastSwapchainColorTexture()!.width, 192);
+    expect(scene.surface.lastSwapchainColorTexture()!.width, 135);
     scene.renderScale = .5;
     draw();
     expect(identical(poolA, scene.surface.transientTexturePool()), isTrue);
     frame = await capture(dpr: 1, width: 120);
     expect(
       [frame.pixelWidth, frame.outputWidth, frame.outputHeight],
-      [60, 120, 64],
+      [60, 60, 32],
     );
     final pending = rendererSubmissions.record();
     rendererSubmissions.endFrame();
@@ -130,19 +117,6 @@ void main() {
         frame.passes.where((p) => p.name == 'PostEffectPass'),
         hasLength(1),
       );
-      expect(frame.passes.map((p) => p.name), isNot(contains('FsrEasuPass')));
     }
-    scene.renderScale = .5;
-    scene.upscaling = SceneUpscaling.none;
-    frame = await capture();
-    expect(frame.outputWidth, 96);
-    expect(frame.passes.where((p) => p.name == 'PostEffectPass'), hasLength(1));
-    expect(frame.passes.map((p) => p.name), isNot(contains('FsrRcasPass')));
-    scene.upscaling = SceneUpscaling.fsr1;
-    Fsr1Resources.disable(StateError('injected capability failure'));
-    frame = await capture();
-    expect(frame.outputWidth, 96);
-    expect(frame.passes.where((p) => p.name == 'PostEffectPass'), hasLength(1));
-    expect(frame.passes.map((p) => p.name), isNot(contains('FsrRcasPass')));
   });
 }

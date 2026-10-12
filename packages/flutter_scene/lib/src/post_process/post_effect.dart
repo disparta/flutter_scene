@@ -62,7 +62,6 @@ class PostEffect {
     this.insertion = PostInsertion.beforeTonemap,
     this.enabled = true,
     this.useFrameInfo = false,
-    this.bypassWhenUpscaling = false,
   }) : _fragmentShader = fragmentShader;
 
   gpu.Shader? _fragmentShader;
@@ -85,10 +84,6 @@ class PostEffect {
 
   /// Whether this effect runs. Disabled effects are skipped.
   bool enabled;
-
-  /// Skip this effect only on frames reconstructed by the scene upscaler.
-  /// Use for legacy sharpening; native/fallback frames retain the effect.
-  bool bypassWhenUpscaling;
 
   /// Whether the engine binds the `PostFrameInfo` block. Set this when the
   /// shader declares and uses it.
