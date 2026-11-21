@@ -16,6 +16,9 @@ import 'fmat_emitter.dart'
     show
         depthSurfaceEntryName,
         kLightmapDefine,
+        kNoDebugViewsDefine,
+        kShadowCascadesDefine,
+        kShadowFilterDefine,
         kRadianceCubeDefine,
         materialHasDepthSurface,
         lightmapEntryName,
@@ -179,6 +182,29 @@ const _frameworkShaderFiles = <String>[
 /// puts flutter_scene's `shaders/` directory on `impellerc`'s include path (via
 /// `buildShaderBundleJson`'s `includeDirectories`), so no framework files are
 /// copied into the consumer's project.
+///
+/// With [shadowVariants] (the default) every lit material is compiled twice:
+/// the entry drawn while the scene binds no shadow atlas leaves the shadow
+/// sampling out, and a `Shadow` twin keeps it, as the bundled physical
+/// materials do. A draw picks between them by itself. Pass false to halve a
+/// lit material's entries when the scene always casts shadows.
+///
+/// Pass [debugViews] false to build the materials without the surface debug
+/// views (`Scene.debugView`, `Node.debugView`); while a view is active they
+/// then show through the engine's fallback debug shader, which serves the
+/// geometry and identity channels only. The views are thousands of lines of
+/// GLSL behind a uniform branch in every fragment entry, which OpenGL ES
+/// drivers on budget phones charge for whether or not a view is on, so a
+/// shipping game usually wants them out.
+///
+/// [directionalShadowFilter] (a `DirectionalShadowFilter` value's name, such
+/// as `'bilinearPcf'`; build hooks cannot import the enum) and
+/// [maxShadowCascades] compile the sun-shadow
+/// sampling for one filter and at most that many cascades. The materials then
+/// sample that way whatever `DirectionalLight.shadowFilter` says, and read no
+/// cascade past the count, so set them only to what every light these
+/// materials are drawn under uses. The same drivers that charge for the debug
+/// views charge for the filters and cascades a frame never takes.
 Future<void> buildMaterials({
   required BuildInput buildInput,
   required BuildOutputBuilder buildOutput,
@@ -186,6 +212,10 @@ Future<void> buildMaterials({
   String bundleName = 'materials',
   String discoveryRoot = 'assets/',
   MaterialAssetMode assetMode = MaterialAssetMode.generatedTree,
+  bool shadowVariants = true,
+  bool debugViews = true,
+  String? directionalShadowFilter,
+  int? maxShadowCascades,
 }) => _buildMaterials(
   buildInput: buildInput,
   buildOutput: buildOutput,
@@ -193,7 +223,39 @@ Future<void> buildMaterials({
   bundleName: bundleName,
   discoveryRoot: discoveryRoot,
   assetMode: assetMode,
+  generateShadowVariants: shadowVariants,
+  debugViews: debugViews,
+  shadowDefines: [
+    if (directionalShadowFilter != null)
+      '$kShadowFilterDefine ${shadowFilterIndex(directionalShadowFilter)}',
+    if (maxShadowCascades != null)
+      '$kShadowCascadesDefine ${maxShadowCascades.clamp(1, 4)}',
+  ],
 );
+
+/// `DirectionalShadowFilter`'s value names in index order, which is the
+/// number the shaders compare against. Kept here because a build hook runs
+/// without Flutter and cannot import the enum; a test holds the two in step.
+const List<String> kDirectionalShadowFilterNames = [
+  'rotatedPoisson',
+  'fixedPcf',
+  'pcss',
+  'bilinearPcf',
+  'bilinear',
+];
+
+/// The shader index of the `DirectionalShadowFilter` named [name].
+int shadowFilterIndex(String name) {
+  final index = kDirectionalShadowFilterNames.indexOf(name);
+  if (index < 0) {
+    throw ArgumentError.value(
+      name,
+      'directionalShadowFilter',
+      'Expected one of ${kDirectionalShadowFilterNames.join(', ')}',
+    );
+  }
+  return index;
+}
 
 /// Builds flutter_scene's bundled physical material shaders.
 ///
@@ -240,6 +302,8 @@ Future<void> _buildMaterials({
   required String discoveryRoot,
   required MaterialAssetMode assetMode,
   bool generateShadowVariants = false,
+  bool debugViews = true,
+  List<String> shadowDefines = const [],
   Set<String> lightmapVariantMaterials = const {},
   Uri? sourceRoot,
   String? owner,
@@ -461,6 +525,8 @@ Future<void> _buildMaterials({
         generateLightmapVariant:
             lightmapVariantMaterials.contains(entryName) &&
             compiled.material.shadingModel != FmatShadingModel.unlit,
+        debugViews: debugViews,
+        shadowDefines: shadowDefines,
       );
       for (final variant in fragmentVariants.entries) {
         final variantEntryName = variant.key;
@@ -497,7 +563,9 @@ Future<void> _buildMaterials({
         };
       });
 
-      sidecars[entryName] = compiled.sidecar;
+      sidecars[entryName] = debugViews
+          ? compiled.sidecar
+          : buildSidecar(compiled.material, debugViews: false);
       materialSources[entryName] = materialPath;
     }
 
@@ -635,16 +703,20 @@ Map<String, String> emitFragmentShaderVariants(
   FmatCompilation compiled, {
   required bool generateShadowVariant,
   bool generateLightmapVariant = false,
+  bool debugViews = true,
+  List<String> shadowDefines = const [],
 }) {
   final material = compiled.material;
   final entryName = material.name;
+  // Defines every entry of this material carries.
+  final common = <String>[if (!debugViews) kNoDebugViewsDefine];
   // The outermost axis, so a Lightmap entry still gets its Shadow and Cube
   // twins. Only materials expected to carry a bake generate it; it doubles
   // the entries of the ones that do.
   final byLightmap = <String, List<String>>{
-    entryName: const [],
+    entryName: common,
     if (generateLightmapVariant)
-      lightmapEntryName(entryName): const [kLightmapDefine],
+      lightmapEntryName(entryName): [...common, kLightmapDefine],
   };
   // The unsuffixed entry is the no-shadow fast path. The Shadow entry keeps
   // the complete sampler layout used when the scene binds a shadow atlas.
@@ -652,9 +724,9 @@ Map<String, String> emitFragmentShaderVariants(
   byLightmap.forEach((name, defines) {
     if (generateShadowVariant) {
       byShadow[name] = [...defines, 'FLUTTER_SCENE_SKIP_SHADOWS'];
-      byShadow['${name}Shadow'] = defines;
+      byShadow['${name}Shadow'] = [...defines, ...shadowDefines];
     } else {
-      byShadow[name] = defines;
+      byShadow[name] = [...defines, ...shadowDefines];
     }
   });
   // Cutouts cut the depth passes by their own surface alpha.
@@ -663,6 +735,7 @@ Map<String, String> emitFragmentShaderVariants(
       for (final kind in DepthSurfaceKind.values)
         depthSurfaceEntryName(material, kind): emitFragmentGlsl(
           material,
+          defines: common,
           depthSurface: kind,
         ),
   };

@@ -213,6 +213,104 @@ void main() {
     expect(count, inInclusiveRange(118, 122));
   });
 
+  testWidgets('maxFrameRate schedules no Flutter frame on a skipped refresh', (
+    tester,
+  ) async {
+    final scene = _tryScene();
+    if (scene == null) {
+      markTestSkipped('No Impeller GPU context');
+      return;
+    }
+    tester.view.display.refreshRate = 60;
+    addTearDown(tester.view.display.reset);
+    final ticks = <Duration>[];
+    await tester.pumpWidget(
+      _sized(
+        SceneView(
+          scene,
+          camera: PerspectiveCamera(),
+          maxFrameRate: 30,
+          onTick: (elapsed, _) => ticks.add(elapsed),
+        ),
+      ),
+    );
+    var frames = 0;
+    tester.binding.addPersistentFrameCallback((_) => frames++);
+    // Two seconds of a 60 Hz display, with a little timestamp jitter.
+    for (var i = 0; i < 120; i++) {
+      await tester.pump(Duration(microseconds: 16667 + (i % 3 - 1) * 400));
+    }
+    expect(ticks.length, inInclusiveRange(59, 61));
+    for (var i = 2; i < ticks.length; i++) {
+      final gap = (ticks[i] - ticks[i - 1]).inMicroseconds;
+      expect(gap, inInclusiveRange(32000, 34600));
+    }
+    // The refreshes in between drew nothing at all.
+    expect(frames, inInclusiveRange(59, 62));
+  });
+
+  testWidgets('maxFrameRate at the refresh rate keeps ticking every refresh', (
+    tester,
+  ) async {
+    final scene = _tryScene();
+    if (scene == null) {
+      markTestSkipped('No Impeller GPU context');
+      return;
+    }
+    tester.view.display.refreshRate = 60;
+    addTearDown(tester.view.display.reset);
+    var count = 0;
+    await tester.pumpWidget(
+      _sized(
+        SceneView(
+          scene,
+          camera: PerspectiveCamera(),
+          maxFrameRate: 60,
+          onTick: (_, __) => count++,
+        ),
+      ),
+    );
+    for (var i = 0; i < 60; i++) {
+      await tester.pump(const Duration(microseconds: 16667));
+      expect(tester.binding.hasScheduledFrame, isTrue);
+    }
+    expect(count, inInclusiveRange(59, 61));
+  });
+
+  testWidgets('a resting capped view wakes when its cap is lifted', (
+    tester,
+  ) async {
+    final scene = _tryScene();
+    if (scene == null) {
+      markTestSkipped('No Impeller GPU context');
+      return;
+    }
+    tester.view.display.refreshRate = 60;
+    addTearDown(tester.view.display.reset);
+    var count = 0;
+    Widget view(double? cap) => _sized(
+      SceneView(
+        scene,
+        camera: PerspectiveCamera(),
+        maxFrameRate: cap,
+        onTick: (_, __) => count++,
+      ),
+    );
+    await tester.pumpWidget(view(10));
+    await tester.pump(const Duration(microseconds: 16667));
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    await tester.pumpWidget(view(null));
+    count = 0;
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(microseconds: 16667));
+    }
+    expect(count, inInclusiveRange(29, 30));
+    // Disposing mid-rest leaves no timer behind.
+    await tester.pumpWidget(view(10));
+    await tester.pump(const Duration(microseconds: 16667));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('autoTick: false does not tick', (tester) async {
     final scene = _tryScene();
     if (scene == null) {

@@ -98,6 +98,9 @@ class AdaptiveQualityController {
   /// A frame period this long means the app paused, not that it is slow.
   static const double pauseSeconds = 0.5;
 
+  /// How many target periods a single frame may count for in a window.
+  static const double stallFactor = 1.5;
+
   static const double _stepDown = 0.85;
 
   double _scale = 1.0;
@@ -137,13 +140,20 @@ class AdaptiveQualityController {
       return false;
     }
     _scale = _scale.clamp(settings.minRenderScale, settings.maxRenderScale);
-    _windowSeconds += frameSeconds;
+    final target = 1.0 / settings.targetFrameRate;
+    // One stalled frame (a blocked platform thread, a garbage collection, a
+    // pipeline build) says nothing about what the pixels cost, and at 30
+    // frames a second a single 130 ms stall is enough to push a 30-frame
+    // mean over the limit. Count a frame as at most [stallFactor] periods,
+    // which a GPU that is really behind still averages well past.
+    _windowSeconds += frameSeconds < target * stallFactor
+        ? frameSeconds
+        : target * stallFactor;
     _windowFrames++;
     if (_windowFrames < windowFrames) return false;
     final mean = _windowSeconds / _windowFrames;
     _windowSeconds = 0;
     _windowFrames = 0;
-    final target = 1.0 / settings.targetFrameRate;
     if (mean > target * 1.1) {
       _fastStreak = 0;
       _cooldown = cooldownWindows;

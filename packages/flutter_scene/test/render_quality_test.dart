@@ -33,6 +33,21 @@ void main() {
     expect(c.tierSteps, 0);
   });
 
+  test('isolated stalls do not cost resolution', () {
+    final c = controller(target: 30);
+    // Two 130 ms stalls a window among frames on time: a blocked platform
+    // thread, not a slow GPU.
+    for (var w = 0; w < 6; w++) {
+      for (var i = 0; i < window; i++) {
+        c.update(i == 5 || i == 20 ? 0.13 : 1 / 30);
+      }
+    }
+    expect(c.scale, 1.0);
+    // Every frame a refresh late is the GPU.
+    feed(c, 0.05, window);
+    expect(c.scale, lessThan(1.0));
+  });
+
   test('overrunning frames step the scale down once per window', () {
     final c = controller();
     feed(c, 1 / 30, window - 1);

@@ -34,8 +34,12 @@ import 'package:vector_math/vector_math.dart' show Vector3;
 /// comes from the material's metadata.
 /// {@category Materials}
 class PreprocessedMaterial extends Material implements HotReloadableFmat {
+  // False for a material built without the surface debug views
+  // (`buildMaterials(debugViews: false)`), whose entries declare no
+  // `DebugViewInfo` block; the engine's fallback shader shows views for it.
   @override
-  bool get participatesInDebugViews => true;
+  bool get participatesInDebugViews => _debugViews;
+  bool _debugViews;
 
   PreprocessedMaterial({
     required gpu.Shader fragmentShader,
@@ -43,6 +47,7 @@ class PreprocessedMaterial extends Material implements HotReloadableFmat {
     Map<String, gpu.Shader>? vertexShaders,
     gpu.Shader? radianceCubeFragmentShader,
   }) : _cubeFragmentShader = radianceCubeFragmentShader,
+       _debugViews = metadata['debug_views'] != false,
        _shadingModel = _parseShadingModel(metadata['shading_model']),
        _blending = _parseBlending(metadata['blending']),
        _culling = _parseCulling(metadata['culling']),
@@ -410,6 +415,7 @@ class PreprocessedMaterial extends Material implements HotReloadableFmat {
     gpu.Shader fragmentShader,
     Map<String, Object?> metadata,
   ) {
+    _debugViews = metadata['debug_views'] != false;
     _shadingModel = _parseShadingModel(metadata['shading_model']);
     _blending = _parseBlending(metadata['blending']);
     _culling = _parseCulling(metadata['culling']);

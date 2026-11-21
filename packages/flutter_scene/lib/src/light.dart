@@ -86,6 +86,13 @@ enum DirectionalShadowFilter {
   /// per tap and interpolates depth tests continuously, giving smooth analog
   /// penumbras without noise or stepping within a 16-sample texture budget.
   bilinearPcf,
+
+  /// One bilinear tap: 4 texel reads, a quarter of the other filters'. The
+  /// edge is a smooth ramp one shadow texel wide whatever
+  /// [DirectionalLight.shadowSoftness] says, so it reads crisp rather than
+  /// soft. For phone-class GPUs, where the sixteen reads of the wider
+  /// filters are most of a shadowed frame.
+  bilinear,
 }
 
 /// An infinitely-distant light source (e.g. the sun) that illuminates

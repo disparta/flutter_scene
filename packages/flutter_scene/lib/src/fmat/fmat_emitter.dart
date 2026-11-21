@@ -200,6 +200,25 @@ bool materialHasDepthSurface(FmatMaterial material) =>
 String depthSurfaceEntryName(FmatMaterial material, DepthSurfaceKind kind) =>
     '${material.name}${kind.suffix}';
 
+/// The define that builds a fragment entry without the surface debug views
+/// (`material_debug.glsl`, its `DebugViewInfo` block and the view select in
+/// `main()`). The entry then draws through the engine's fallback debug
+/// shader while a view is active, like a material that never had them.
+///
+/// The views cost nothing a desktop GPU notices, but they are several
+/// thousand lines behind a uniform branch in every fragment entry, and
+/// OpenGL ES drivers on budget phones charge for code they never run.
+const String kNoDebugViewsDefine = 'FLUTTER_SCENE_NO_DEBUG_VIEWS';
+
+/// The define (with a `DirectionalShadowFilter` index as its value) that
+/// compiles the sun-shadow sampling for that one filter. See
+/// `material_shadow_sampling.glsl`.
+const String kShadowFilterDefine = 'FLUTTER_SCENE_SHADOW_FILTER';
+
+/// The define (with a count from 1 to 4 as its value) that compiles the
+/// sun-shadow lookup for at most that many cascades.
+const String kShadowCascadesDefine = 'FLUTTER_SCENE_SHADOW_CASCADES';
+
 String emitFragmentGlsl(
   FmatMaterial material, {
   Iterable<String> defines = const [],
@@ -210,6 +229,7 @@ String emitFragmentGlsl(
   }
   final sb = StringBuffer();
   final lit = material.shadingModel != FmatShadingModel.unlit;
+  final debugViews = !defines.contains(kNoDebugViewsDefine);
 
   sb.writeln(
     '// Generated from a .fmat material by flutter_scene. '
@@ -273,7 +293,7 @@ String emitFragmentGlsl(
   }
   sb.writeln('#include <normals.glsl>');
   sb.writeln('#include <material_inputs.glsl>');
-  sb.writeln('#include <material_debug.glsl>');
+  if (debugViews) sb.writeln('#include <material_debug.glsl>');
   if (material.alphaToCoverage) {
     sb.writeln('#include <material_coverage.glsl>');
   }
@@ -423,7 +443,11 @@ String emitFragmentGlsl(
     sb.writeln('  material.base_color.a = 1.0;');
   }
   final keepAlive = _fragmentKeepAliveTerm(material, uniforms, samplers);
-  _writeDebugViewSelect(sb);
+  if (debugViews) {
+    _writeDebugViewSelect(sb);
+  } else {
+    sb.writeln('  frag_color = MaterialOutput(material);');
+  }
   if (keepAlive != null) {
     // Folded into the final output, since a lighting hook may never read the
     // surface color, under a uniform branch that is never taken.
@@ -919,9 +943,13 @@ String _emitSkyGlsl(
 }
 
 /// Builds the JSON-serializable metadata sidecar for [material].
-Map<String, Object?> buildSidecar(FmatMaterial material) {
+Map<String, Object?> buildSidecar(
+  FmatMaterial material, {
+  bool debugViews = true,
+}) {
   return <String, Object?>{
     'name': material.name,
+    if (!debugViews) 'debug_views': false,
     'framework_varying_schema': kFrameworkVaryingSchemaVersion,
     'domain': material.domain.name,
     if (material.useEnvironment) 'use_environment': true,

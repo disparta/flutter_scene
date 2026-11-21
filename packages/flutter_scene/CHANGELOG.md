@@ -1,3 +1,12 @@
+## Unreleased (disparta fork: low-end mobile)
+
+* `SceneView` rests its ticker between frames when `maxFrameRate` skips whole display refreshes, so Flutter composites one frame per scene frame instead of one per refresh. On a Nokia 3.4 at a 30 FPS cap that took raster time per scene frame from about 25 ms to 10 ms. `restBetweenFrames: false` restores a tick on every refresh.
+* `buildMaterials(debugViews: false)` builds materials without the surface debug views. While a view is active they show through the engine's fallback debug shader. The views are behind a uniform branch, but an Adreno 610's driver charged 42 ms a frame at 780x360 for them.
+* `buildMaterials` compiles a no-shadow entry and a `Shadow` twin for every lit `.fmat` (`shadowVariants`, on by default), as the bundled physical materials already had, and `loadFmatMaterial` picks between them by whether the scene binds a shadow atlas.
+* `buildMaterials(directionalShadowFilter:, maxShadowCascades:)` compiles the sun-shadow sampling for one filter and a cascade limit; the other filters and cascades cost the same driver another 28 ms.
+* `DirectionalShadowFilter.bilinear`: one bilinear tap (4 texel reads).
+* The adaptive render scale counts a single frame as at most 1.5 target periods, so an isolated stall no longer reads as a slow GPU.
+
 ## 0.24.0
 
 * `Material.depthLayer` (`.fmat` `depth_layer:`) orders surfaces that share a plane. A higher layer draws over a lower one at any distance, so signs, screens, and road paint laid on a surface stop flickering (z-fighting).
