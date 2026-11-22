@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_scene/src/gpu/gpu.dart' as gpu;
+import 'package:vector_math/vector_math.dart' show Vector3;
 import 'package:flutter_scene/src/gpu/render_pass_compat.dart';
 
 import 'package:flutter_scene/src/material/material.dart';
@@ -62,8 +63,33 @@ class ResolvePass extends RenderGraphPass {
 
   static final gpu.Shader _vertexShader =
       baseShaderLibrary['FullscreenVertex']!;
-  static final gpu.Shader _fragmentShader =
+  static final gpu.Shader _fullFragmentShader =
       baseShaderLibrary['ResolveFragment']!;
+  static final gpu.Shader? _fastFragmentShader =
+      baseShaderLibrary['ResolveFastFragment'];
+
+  /// Whether this frame needs nothing `flutter_scene_resolve_fast.frag`
+  /// leaves out: AgX tone mapping, grading without lift, gamma or gain, and
+  /// none of the optional effects. [autoExposure] is whether an adapted
+  /// exposure factor was published this frame.
+  bool _fast({required bool bloom, required bool autoExposure}) {
+    if (_toneMappingMode != ToneMappingMode.agx) return false;
+    if (_debugViewActive || bloom || autoExposure) return false;
+    final post = _postProcess;
+    if (post.chromaticAberration.enabled ||
+        post.vignette.enabled ||
+        post.filmGrain.enabled) {
+      return false;
+    }
+    final grading = post.colorGrading;
+    if (!grading.enabled) return true;
+    bool all(Vector3 v, double value) =>
+        v.x == value && v.y == value && v.z == value;
+    return grading.lut == null &&
+        all(grading.lift, 0) &&
+        all(grading.gamma, 1) &&
+        all(grading.gain, 1);
+  }
 
   // Two triangles of NDC positions covering the screen (6 vec2s).
   static final gpu.DeviceBuffer _quadBuffer = gpu.gpuContext
@@ -94,7 +120,15 @@ class ResolvePass extends RenderGraphPass {
     final renderPass = commandBuffer.createRenderPass(
       gpu.RenderTarget.singleColor(gpu.ColorAttachment(texture: _outputColor)),
     );
-    final pipeline = resolvePipeline(_vertexShader, _fragmentShader);
+    final bloomEnabled = _postProcess.bloom.enabled && !_debugSkipsPost;
+    final autoExposureFactor = context.blackboard.get<gpu.Texture>(
+      kAutoExposureFactorBlackboardKey,
+    );
+    final fast =
+        _fastFragmentShader != null &&
+        _fast(bloom: bloomEnabled, autoExposure: autoExposureFactor != null);
+    final fragmentShader = fast ? _fastFragmentShader! : _fullFragmentShader;
+    final pipeline = resolvePipeline(_vertexShader, fragmentShader);
     renderPass.bindPipeline(pipeline);
     bindVertexBufferCompat(renderPass, _quadView, 6);
 
@@ -114,14 +148,14 @@ class ResolvePass extends RenderGraphPass {
       settings: _postProcess,
       debugViewActive: _debugViewActive,
       debugViewSplit: _debugViewSplit,
-      bloomEnabled: _postProcess.bloom.enabled && !_debugSkipsPost,
+      bloomEnabled: bloomEnabled,
     );
     renderPass.bindUniform(
-      _fragmentShader.getUniformSlot('ResolveInfo'),
+      fragmentShader.getUniformSlot('ResolveInfo'),
       context.transientsBuffer.emplace(ByteData.sublistView(info)),
     );
     renderPass.bindTexture(
-      _fragmentShader.getUniformSlot('scene_color'),
+      fragmentShader.getUniformSlot('scene_color'),
       hdrColor,
       sampler: gpu.SamplerOptions(
         minFilter: gpu.MinMagFilter.linear,
@@ -130,13 +164,20 @@ class ResolvePass extends RenderGraphPass {
         heightAddressMode: gpu.SamplerAddressMode.clampToEdge,
       ),
     );
+    if (fast) {
+      // The fast shader declares no other sampler.
+      drawCompat(renderPass, 6);
+      rendererSubmissions.submit(commandBuffer);
+      context.blackboard.set(kDisplayColorBlackboardKey, _outputColor);
+      return;
+    }
     // Bloom is present only when BloomPass ran this frame; otherwise a
     // placeholder fills the slot and the resolve skips it (flag off).
     final bloomTexture =
         context.blackboard.get<gpu.Texture>(kBloomTextureBlackboardKey) ??
         Material.getWhitePlaceholderTexture();
     renderPass.bindTexture(
-      _fragmentShader.getUniformSlot('bloom_color'),
+      fragmentShader.getUniformSlot('bloom_color'),
       bloomTexture,
       sampler: gpu.SamplerOptions(
         minFilter: gpu.MinMagFilter.linear,
@@ -149,10 +190,9 @@ class ResolvePass extends RenderGraphPass {
     // AutoExposurePass ran this frame; otherwise the white placeholder
     // supplies a neutral 1.0.
     final exposureFactor =
-        context.blackboard.get<gpu.Texture>(kAutoExposureFactorBlackboardKey) ??
-        Material.getWhitePlaceholderTexture();
+        autoExposureFactor ?? Material.getWhitePlaceholderTexture();
     renderPass.bindTexture(
-      _fragmentShader.getUniformSlot('exposure_factor'),
+      fragmentShader.getUniformSlot('exposure_factor'),
       exposureFactor,
       sampler: gpu.SamplerOptions(
         minFilter: gpu.MinMagFilter.nearest,
@@ -164,7 +204,7 @@ class ResolvePass extends RenderGraphPass {
     // The film-look grading LUT, or a neutral placeholder when no look is
     // set (lut_params.x stays 0 and the sample is skipped).
     renderPass.bindTexture(
-      _fragmentShader.getUniformSlot('grading_lut'),
+      fragmentShader.getUniformSlot('grading_lut'),
       _postProcess.colorGrading.lut?.texture ??
           Material.getWhitePlaceholderTexture(),
       sampler: gpu.SamplerOptions(

@@ -163,5 +163,14 @@ final Map<VertexLayoutDescriptor, int> _layoutIds = {};
 /// caches include this in their key so two layouts on one vertex shader do
 /// not collide.
 @internal
-int vertexLayoutId(VertexLayoutDescriptor? layout) =>
-    layout == null ? 0 : (_layoutIds[layout] ??= _layoutIds.length + 1);
+int vertexLayoutId(VertexLayoutDescriptor? layout) {
+  if (layout == null) return 0;
+  // Every draw asks, and a layout's structural hash walks each attribute's
+  // name: on a budget phone or TV CPU that was a tenth of the frame. A
+  // geometry hands back the same descriptor object each time, so remember
+  // the id by identity and hash a descriptor once.
+  return _layoutIdByInstance[layout] ??= _layoutIds[layout] ??=
+      _layoutIds.length + 1;
+}
+
+final Expando<int> _layoutIdByInstance = Expando<int>();

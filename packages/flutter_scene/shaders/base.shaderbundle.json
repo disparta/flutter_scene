@@ -179,6 +179,10 @@
     "type": "fragment",
     "file": "shaders/flutter_scene_resolve.frag"
   },
+  "ResolveFastFragment": {
+    "type": "fragment",
+    "file": "shaders/flutter_scene_resolve_fast.frag"
+  },
   "FxaaFragment": {
     "type": "fragment",
     "file": "shaders/flutter_scene_fxaa.frag"
