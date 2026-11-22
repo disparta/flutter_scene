@@ -406,11 +406,15 @@ class ScenePass extends RenderGraphPass {
     final commandBuffer = gpu.gpuContext.createCommandBuffer();
     final renderPass = commandBuffer.createRenderPass(target);
 
-    // Draw the background first, behind the geometry. It writes no depth, so
-    // the opaque phase (depth-tested against the cleared far value) draws
-    // over it; the encoder constructor below re-asserts the opaque state.
-    final skybox = _skybox;
-    if (skybox != null) {
+    // The background is drawn after the opaque phase, at the far plane and
+    // depth-tested, so only the pixels no geometry covered are shaded. Drawn
+    // first it filled the whole target every frame, which a camera looking
+    // down at terrain then drew over entirely: a full-screen pass of the sky
+    // shader for nothing, about an eighth of the graphics time of a handheld
+    // at 10 W drawing 1080p.
+    void encodeBackground(SceneEncoder encoder) {
+      final skybox = _skybox;
+      if (skybox == null) return;
       encodeSkybox(
         renderPass,
         context.transientsBuffer,
@@ -423,6 +427,8 @@ class ScenePass extends RenderGraphPass {
         environmentMapB: _environmentMapB,
         environmentBlend: _environmentBlend,
       );
+      // The sky bound its own pipeline and state behind the encoder's back.
+      encoder.invalidateBindings();
     }
 
     final encoder = SceneEncoder(
@@ -459,7 +465,9 @@ class ScenePass extends RenderGraphPass {
 
     if (!capture || !encoder.hasPendingSceneColorReaders) {
       final flushWatch = profileRendering ? (Stopwatch()..start()) : null;
-      encoder.flush();
+      encoder.flushOpaque();
+      encodeBackground(encoder);
+      encoder.flushTranslucent();
       _encodeDebugOverlays(renderPass, context.transientsBuffer, encoder);
       flushWatch?.stop();
       if (profileRendering) {
@@ -480,6 +488,7 @@ class ScenePass extends RenderGraphPass {
     // with disjoint projected bounds share a capture, while overlapping
     // readers get the accumulated color produced by the preceding batch.
     encoder.flushOpaque();
+    encodeBackground(encoder);
     if (encoder.hasPendingTranslucent &&
         !encoder.nextTranslucentBatchReadsSceneColor) {
       encoder.flushNextTranslucentBatch();

@@ -430,6 +430,7 @@ Future<void> _buildMaterials({
       buildInput,
       'fmat package=$assetOwner bundle=$bundleName '
       'shadows=$generateShadowVariants '
+      'debugViews=$debugViews shadowDefines=${shadowDefines.join(',')} '
       'lightmaps=${(lightmapVariantMaterials.toList()..sort()).join(',')}',
     ),
   );

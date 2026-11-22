@@ -2064,19 +2064,7 @@ base class SceneEncoder {
 
     if (translucentPass != null) {
       _renderPass = translucentPass;
-      _boundPipeline = null;
-      _boundMaterial = null;
-      _boundMaterialVertex = null;
-      _boundFrameInfoShader = null;
-      _boundFrameInfoDepthBias = double.nan;
-      _boundFrameInfoDepthKey = -1;
-      _boundMaterialFade = double.nan;
-      _boundMaterialLightOffset = -1;
-      _boundMaterialLightCount = -1;
-      _boundMaterialLightChannelMask = -1;
-      _boundWindingOrder = null;
-      _boundPrimitiveType = null;
-      EngineLightingUniforms.invalidateBindMemo();
+      invalidateBindings();
     }
     _renderPass.setDepthCompareOperation(_raster.nearerOrEqual);
     final encodeWatch = profileRendering ? (Stopwatch()..start()) : null;
@@ -2172,6 +2160,25 @@ base class SceneEncoder {
       _translucentSortMicros = 0;
       _translucentEncodeMicros = 0;
     }
+  }
+
+  /// Forgets what this encoder believes is bound to its render pass, after
+  /// something else recorded draws into the pass (the sky, between the opaque
+  /// and translucent phases) or the pass itself changed.
+  void invalidateBindings() {
+    _boundPipeline = null;
+    _boundMaterial = null;
+    _boundMaterialVertex = null;
+    _boundFrameInfoShader = null;
+    _boundFrameInfoDepthBias = double.nan;
+    _boundFrameInfoDepthKey = -1;
+    _boundMaterialFade = double.nan;
+    _boundMaterialLightOffset = -1;
+    _boundMaterialLightCount = -1;
+    _boundMaterialLightChannelMask = -1;
+    _boundWindingOrder = null;
+    _boundPrimitiveType = null;
+    EngineLightingUniforms.invalidateBindMemo();
   }
 
   /// Emits only the translucent phase (see [flush]).
