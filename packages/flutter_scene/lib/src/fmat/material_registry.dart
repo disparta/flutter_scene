@@ -255,6 +255,13 @@ final class FmatMaterialRegistry {
           metadata: metadata,
           vertexShaders: vertexShaders,
         );
+    // A lit material built with shadow variants draws its `Shadow` twin
+    // while the scene binds a shadow atlas; the plain entry leaves the
+    // shadow sampling out. Bundles built without the twins have none, and
+    // their one entry serves both.
+    final shadowEntry = '${resolution.entry.entryName}Shadow';
+    final shadowShader = shaderLibrary[shadowEntry];
+    if (shadowShader != null) material.setShadowFragmentShader(shadowShader);
     _applyRadianceCubeShader(
       material,
       metadata,
@@ -488,5 +495,8 @@ void _applyRadianceCubeShader(
       '$shaderBundleAssetKey. Rebuild the material bundle.',
     );
   }
-  material.setRadianceCubeFragmentShaders(shader);
+  material.setRadianceCubeFragmentShaders(
+    shader,
+    shadow: shaderLibrary[radianceCubeEntryName('${entryName}Shadow')],
+  );
 }

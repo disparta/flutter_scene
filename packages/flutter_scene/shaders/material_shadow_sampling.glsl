@@ -135,7 +135,18 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
   // Select the tap positions without duplicating the texture samples in both
   // branches. Duplicating both kernels here expands to 33 samples per cascade
   // in the generated GLES source even though the choice is uniform.
+  //
+  // FLUTTER_SCENE_SHADOW_FILTER (a DirectionalShadowFilter index, from
+  // `buildMaterials(directionalShadowFilter:)`) compiles one filter in and
+  // the others out. The choice is uniform, but OpenGL ES drivers on budget
+  // phones charge for the branches not taken: with every filter present an
+  // Adreno 610 spends the same on a 4-read filter as on a 16-read one.
+#ifdef FLUTTER_SCENE_SHADOW_FILTER
+  const float filter_index = float(FLUTTER_SCENE_SHADOW_FILTER);
+#else
   float filter_index = frag_info.directional_light_direction.w;
+#endif
+#if !defined(FLUTTER_SCENE_SHADOW_FILTER) || FLUTTER_SCENE_SHADOW_FILTER != 4
   float fixed_filter = step(0.5, filter_index) * (1.0 - step(1.5, filter_index));
   // The fixed grid does not rotate, so it skips the noise, cosine, and sine.
   float ca = 1.0;
@@ -148,11 +159,13 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
     ca = cos(angle);
     sa = sin(angle);
   }
+#endif
 
   // World-space penumbra -> this cascade's UV space, floored at a texel.
   highp float max_radius =
       max(frag_info.shadow_softness / box, frag_info.shadow_texel_size);
   highp float radius = max_radius;
+#if !defined(FLUTTER_SCENE_SHADOW_FILTER) || FLUTTER_SCENE_SHADOW_FILTER == 2
   if (filter_index > 1.5 && filter_index < 2.5) {
     // Percentage-closer soft shadows: find the mean blocker depth inside the
     // light's angular cone, then widen the filter with the blocker distance
@@ -176,6 +189,7 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
     highp float penumbra = cone * 7.0 * max(receiver_depth - mean_blocker, 0.0);
     radius = clamp(penumbra, frag_info.shadow_texel_size, max_radius);
   }
+#endif
 
   // The Poisson positions are selected when fixed_filter is 0, the stable grid
   // positions when it is 1. The latter preserves the same 17-tap pattern.
@@ -186,9 +200,20 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
   // Most fragments are fully lit or fully shadowed. Probe the kernel's center
   // and corners first and run the full kernel only where they disagree (the
   // penumbra), which cuts the shadow-map reads on texture-rate-bound GPUs.
-  // PCSS keeps its own path, since its blocker search sizes the kernel.
+  // PCSS keeps its own path, since its blocker search sizes the kernel, and
+  // the single bilinear tap reads fewer texels than the probe would.
   bool settled = false;
-  if (filter_index < 1.5 || filter_index > 2.5) {
+#if !defined(FLUTTER_SCENE_SHADOW_FILTER) || FLUTTER_SCENE_SHADOW_FILTER == 4
+  if (filter_index > 3.5) {
+    // One bilinear tap at the receiver: 4 samples, an edge one texel wide.
+    shadow = ShadowTapBilinear(vec2(0.0), 0.0, uv, origin, extent,
+                               receiver_depth);
+    settled = true;
+  }
+#endif
+#if !defined(FLUTTER_SCENE_SHADOW_FILTER) || \
+    (FLUTTER_SCENE_SHADOW_FILTER != 2 && FLUTTER_SCENE_SHADOW_FILTER != 4)
+  if (filter_index < 1.5 || (filter_index > 2.5 && filter_index < 3.5)) {
     float probe =
         ShadowTap(vec2(0.0), ca, sa, radius, uv, origin, extent,
                   receiver_depth) +
@@ -200,12 +225,13 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
                   receiver_depth) +
         ShadowTap(vec2(1.0, 1.0), ca, sa, radius, uv, origin, extent,
                   receiver_depth);
+    // When the probes agree, the kernel would too.
     settled = probe < 0.5 || probe > 4.5;
     shadow = probe * 0.2;
   }
-  if (settled) {
-    // The probes agree, so the kernel would too.
-  } else if (filter_index > 2.5) {
+#endif
+#if !defined(FLUTTER_SCENE_SHADOW_FILTER) || FLUTTER_SCENE_SHADOW_FILTER == 3
+  if (!settled && filter_index > 2.5) {
     // 4-tap bilinear PCF: 4 taps x 4 texels = 16 samples total (matching the
     // 16-sample budget), producing continuous analog filtering with zero
     // noise rotation or stepped banding.
@@ -218,7 +244,10 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
                 ShadowTapBilinear(vec2(0.7071, 0.7071), radius, uv, origin,
                                   extent, receiver_depth);
     shadow = lit * 0.25;
-  } else {
+  }
+#endif
+#if !defined(FLUTTER_SCENE_SHADOW_FILTER) || FLUTTER_SCENE_SHADOW_FILTER <= 2
+  if (!settled && filter_index < 2.5) {
     int sample_count = fixed_filter > 0.5 ? 17 : 16;
     float lit = 0.0;
     for (int i = 0; i < 17; i++) {
@@ -229,6 +258,7 @@ float SampleCascade(int cascade, int count, highp vec3 proj, highp float box) {
     }
     shadow = lit / float(sample_count);
   }
+#endif
 
   // Only the last cascade has a real outer edge (inner cascades hand
   // off to the next), so fade just it back to lit at the boundary.
@@ -293,15 +323,45 @@ float SampleShadow(highp vec3 world_pos, vec3 n) {
   // A fully faded fragment would discard its taps, so it skips them.
   // A single `return` (no early return inside the loop) also avoids a
   // nested-loop pattern that crashes a Direct3D shader compiler.
+  //
+  // FLUTTER_SCENE_SHADOW_CASCADES (`buildMaterials(maxShadowCascades:)`)
+  // bounds the loop by a constant and leaves the matrices past that count
+  // out, for the same reason as FLUTTER_SCENE_SHADOW_FILTER.
   if (fade < 1.0) {
+#ifdef FLUTTER_SCENE_SHADOW_CASCADES
+    for (int i = 0; i < FLUTTER_SCENE_SHADOW_CASCADES; i++) {
+      if (weight < 1.0 && i < count) {
+#else
     for (int i = 0; i < count; i++) {
       // No break: the remaining cascades fall through this test instead, so
       // the loop has a single exit.
       if (weight < 1.0) {
+#endif
         highp vec4 pos = vec4(biased_world_pos, 1.0);
 #if defined(IMPELLER_TARGET_METAL) || defined(IMPELLER_TARGET_VULKAN)
         highp vec4 light_clip = frag_info.light_space_matrix[i] * pos;
         highp float box = frag_info.cascade_box_sizes[i];
+#elif defined(FLUTTER_SCENE_SHADOW_CASCADES)
+        highp vec4 light_clip = frag_info.light_space_matrix[0] * pos;
+        highp float box = frag_info.cascade_box_sizes[0];
+#if FLUTTER_SCENE_SHADOW_CASCADES > 1
+        if (i == 1) {
+          light_clip = frag_info.light_space_matrix[1] * pos;
+          box = frag_info.cascade_box_sizes[1];
+        }
+#endif
+#if FLUTTER_SCENE_SHADOW_CASCADES > 2
+        if (i == 2) {
+          light_clip = frag_info.light_space_matrix[2] * pos;
+          box = frag_info.cascade_box_sizes[2];
+        }
+#endif
+#if FLUTTER_SCENE_SHADOW_CASCADES > 3
+        if (i == 3) {
+          light_clip = frag_info.light_space_matrix[3] * pos;
+          box = frag_info.cascade_box_sizes[3];
+        }
+#endif
 #else
         // Literal indices, since some GLES drivers misread a dynamically
         // indexed uniform array. Each branch transforms by its own matrix,

@@ -20,6 +20,8 @@ import 'fmat_emitter.dart'
         depthSurfaceEntryName,
         kDebugViewsDefine,
         kLightmapDefine,
+        kShadowCascadesDefine,
+        kShadowFilterDefine,
         kRadianceCubeDefine,
         materialHasDepthSurface,
         lightmapEntryName,
@@ -192,6 +194,21 @@ const _frameworkShaderFiles = <String>[
 /// The app's `flutter_scene_lighting_features` hook user-define compiles lit
 /// features out of the materials, like flutter_scene's own
 /// `lighting_features` does for the engine's shaders, so set both.
+///
+/// With [shadowVariants] (the default) every lit material is compiled twice:
+/// the entry drawn while the scene binds no shadow atlas leaves the shadow
+/// sampling out, and a `Shadow` twin keeps it, as the bundled physical
+/// materials do. A draw picks between them by itself. Pass false to halve a
+/// lit material's entries when the scene always casts shadows.
+///
+/// [directionalShadowFilter] (a `DirectionalShadowFilter` value's name, such
+/// as `'bilinearPcf'`; build hooks cannot import the enum) and
+/// [maxShadowCascades] compile the sun-shadow sampling for one filter and at
+/// most that many cascades. The materials then sample that way whatever
+/// `DirectionalLight.shadowFilter` says, and read no cascade past the count,
+/// so set them only to what every light these materials are drawn under uses.
+/// OpenGL ES drivers on budget phones charge for the filters and cascades a
+/// frame never takes.
 Future<void> buildMaterials({
   required BuildInput buildInput,
   required BuildOutputBuilder buildOutput,
@@ -200,6 +217,9 @@ Future<void> buildMaterials({
   String discoveryRoot = 'assets/',
   MaterialAssetMode assetMode = MaterialAssetMode.generatedTree,
   bool? debugViews,
+  bool shadowVariants = true,
+  String? directionalShadowFilter,
+  int? maxShadowCascades,
 }) => _buildMaterials(
   buildInput: buildInput,
   buildOutput: buildOutput,
@@ -211,7 +231,38 @@ Future<void> buildMaterials({
   compiledOutLightingFeatures: HookOptions.of(
     buildInput,
   ).compiledOutLightingFeatures,
+  generateShadowVariants: shadowVariants,
+  shadowDefines: [
+    if (directionalShadowFilter != null)
+      '$kShadowFilterDefine ${shadowFilterIndex(directionalShadowFilter)}',
+    if (maxShadowCascades != null)
+      '$kShadowCascadesDefine ${maxShadowCascades.clamp(1, 4)}',
+  ],
 );
+
+/// `DirectionalShadowFilter`'s value names in index order, which is the
+/// number the shaders compare against. Kept here because a build hook runs
+/// without Flutter and cannot import the enum; a test holds the two in step.
+const List<String> kDirectionalShadowFilterNames = [
+  'rotatedPoisson',
+  'fixedPcf',
+  'pcss',
+  'bilinearPcf',
+  'bilinear',
+];
+
+/// The shader index of the `DirectionalShadowFilter` named [name].
+int shadowFilterIndex(String name) {
+  final index = kDirectionalShadowFilterNames.indexOf(name);
+  if (index < 0) {
+    throw ArgumentError.value(
+      name,
+      'directionalShadowFilter',
+      'Expected one of ${kDirectionalShadowFilterNames.join(', ')}',
+    );
+  }
+  return index;
+}
 
 /// Builds flutter_scene's bundled physical material shaders.
 ///
@@ -269,6 +320,7 @@ Future<void> _buildMaterials({
   String? fileVariant,
   bool debugViews = false,
   Set<LightingFeature> compiledOutLightingFeatures = const {},
+  List<String> shadowDefines = const [],
 }) async {
   // ignore: deprecated_member_use_from_same_package
   if (assetMode == MaterialAssetMode.legacyOnly) {
@@ -398,6 +450,7 @@ Future<void> _buildMaterials({
       buildInput,
       'fmat package=$assetOwner bundle=$bundleName '
       'shadows=$generateShadowVariants debug_views=$debugViews '
+      'shadow_defines=${shadowDefines.join(',')} '
       'lighting_off='
       '${describeCompiledOutLightingFeatures(compiledOutLightingFeatures)} '
       'lightmaps=${(lightmapVariantMaterials.toList()..sort()).join(',')}',
@@ -496,6 +549,7 @@ Future<void> _buildMaterials({
             compiled.material.shadingModel != FmatShadingModel.unlit,
         debugViews: debugViews,
         compiledOutLightingFeatures: compiledOutLightingFeatures,
+        shadowDefines: shadowDefines,
       );
       for (final variant in fragmentVariants.entries) {
         final variantEntryName = variant.key;
@@ -654,6 +708,7 @@ Map<String, String> emitFragmentShaderVariants(
   bool generateLightmapVariant = false,
   bool debugViews = false,
   Set<LightingFeature> compiledOutLightingFeatures = const {},
+  List<String> shadowDefines = const [],
 }) {
   final material = compiled.material;
   final entryName = material.name;
@@ -678,9 +733,9 @@ Map<String, String> emitFragmentShaderVariants(
   byLightmap.forEach((name, defines) {
     if (generateShadowVariant) {
       byShadow[name] = [...defines, 'FLUTTER_SCENE_SKIP_SHADOWS'];
-      byShadow['${name}Shadow'] = defines;
+      byShadow['${name}Shadow'] = [...defines, ...shadowDefines];
     } else {
-      byShadow[name] = defines;
+      byShadow[name] = [...defines, ...shadowDefines];
     }
   });
   // Cutouts cut the depth passes by their own surface alpha.

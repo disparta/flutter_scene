@@ -205,6 +205,15 @@ bool materialHasDepthSurface(FmatMaterial material) =>
 String depthSurfaceEntryName(FmatMaterial material, DepthSurfaceKind kind) =>
     '${material.name}${kind.suffix}';
 
+/// The define (with a `DirectionalShadowFilter` index as its value) that
+/// compiles the sun-shadow sampling for that one filter. See
+/// `material_shadow_sampling.glsl`.
+const String kShadowFilterDefine = 'FLUTTER_SCENE_SHADOW_FILTER';
+
+/// The define (with a count from 1 to 4 as its value) that compiles the
+/// sun-shadow lookup for at most that many cascades.
+const String kShadowCascadesDefine = 'FLUTTER_SCENE_SHADOW_CASCADES';
+
 String emitFragmentGlsl(
   FmatMaterial material, {
   Iterable<String> defines = const [],
