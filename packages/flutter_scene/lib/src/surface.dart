@@ -107,6 +107,23 @@ class Surface {
     return bytes;
   }
 
+  /// Residency of the presentation ring, separate from transient attachments.
+  @internal
+  static ({int bytes, int count}) get livePresentationTextures {
+    var bytes = 0, count = 0;
+    _forEachLive((surface) {
+      for (final view in surface._views) {
+        for (final sized in view._sizes) {
+          for (final texture in sized.swapchainColors) {
+            bytes += gpuTextureBytes(texture);
+            count++;
+          }
+        }
+      }
+    });
+    return (bytes: bytes, count: count);
+  }
+
   /// Releases every transient attachment this surface's views hold, and the
   /// targets of sizes other than the current one, returning the bytes
   /// released.

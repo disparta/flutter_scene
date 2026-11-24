@@ -149,15 +149,24 @@ class RenderViewStats {
     required this.width,
     required this.height,
     required this.offscreen,
-  });
+    this.renderScale = 1,
+    int? outputWidth,
+    int? outputHeight,
+  }) : outputWidth = outputWidth ?? width,
+       outputHeight = outputHeight ?? height;
 
   /// The screen view index, or -1 for a render-texture view.
   final int viewIndex;
   final int width;
   final int height;
+  final int outputWidth;
+  final int outputHeight;
 
   /// True for a render-texture view (not composited to the canvas).
   final bool offscreen;
+
+  /// Effective requested scale (including adaptive scaling) for this frame.
+  final double renderScale;
 
   /// CPU time spent building and executing this view's render graph.
   int cpuMicros = 0;
@@ -169,7 +178,10 @@ class RenderViewStats {
     'viewIndex': viewIndex,
     'width': width,
     'height': height,
+    'outputWidth': outputWidth,
+    'outputHeight': outputHeight,
     'offscreen': offscreen,
+    'renderScale': renderScale,
     'cpuMicros': cpuMicros,
     'counters': counters.toJson(),
     'passes': [for (final pass in passes) pass.toJson()],
@@ -286,6 +298,9 @@ class RenderStats {
     required int width,
     required int height,
     required bool offscreen,
+    double renderScale = 1,
+    int? outputWidth,
+    int? outputHeight,
   }) {
     final frame = _active;
     if (frame == null) return null;
@@ -294,6 +309,9 @@ class RenderStats {
       width: width,
       height: height,
       offscreen: offscreen,
+      renderScale: renderScale,
+      outputWidth: outputWidth,
+      outputHeight: outputHeight,
     );
     frame.views.add(view);
     return view;

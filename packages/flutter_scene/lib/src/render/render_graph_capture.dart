@@ -510,7 +510,10 @@ class RenderGraphCaptureResult {
     required this.resources,
     required this.pixelWidth,
     required this.pixelHeight,
-  });
+    int? outputWidth,
+    int? outputHeight,
+  }) : outputWidth = outputWidth ?? pixelWidth,
+       outputHeight = outputHeight ?? pixelHeight;
 
   final List<CapturedPass> passes;
 
@@ -522,6 +525,8 @@ class RenderGraphCaptureResult {
   /// The captured view's render size in physical pixels.
   final int pixelWidth;
   final int pixelHeight;
+  final int outputWidth;
+  final int outputHeight;
 
   /// Every draw of the frame, in execution order.
   Iterable<CapturedDraw> get draws sync* {
@@ -546,6 +551,8 @@ class RenderGraphCaptureResult {
         ],
         pixelWidth: json['pixelWidth'] as int? ?? 0,
         pixelHeight: json['pixelHeight'] as int? ?? 0,
+        outputWidth: json['outputWidth'] as int?,
+        outputHeight: json['outputHeight'] as int?,
       );
 
   /// Parses [toJsonString] output.
@@ -572,6 +579,8 @@ class RenderGraphCaptureResult {
       'version': 1,
       'pixelWidth': pixelWidth,
       'pixelHeight': pixelHeight,
+      'outputWidth': outputWidth,
+      'outputHeight': outputHeight,
       'passes': [
         for (final pass in passes)
           pass.toJson(includeUniformBytes: includeUniformBytes),
@@ -629,11 +638,15 @@ class RenderGraphCapturer implements RenderGraphObserver, DrawRecorder {
   RenderGraphCaptureResult finish({
     required int pixelWidth,
     required int pixelHeight,
+    int? outputWidth,
+    int? outputHeight,
   }) => RenderGraphCaptureResult(
     passes: _passes,
     resources: _resources,
     pixelWidth: pixelWidth,
     pixelHeight: pixelHeight,
+    outputWidth: outputWidth,
+    outputHeight: outputHeight,
   );
 
   @override

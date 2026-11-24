@@ -299,7 +299,6 @@ class TransientTexturePool {
 
   /// Textures every [TransientTexturePool] has created. For tests that check
   /// steady-state rendering allocates nothing.
-  @visibleForTesting
   static int texturesCreated = 0;
 
   /// Advances to the next frame's ring slot. Call once per frame before

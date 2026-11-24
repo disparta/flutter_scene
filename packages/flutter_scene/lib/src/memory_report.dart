@@ -66,6 +66,7 @@ class MemoryReport {
 /// {@category Assets and loading}
 MemoryReport takeMemoryReport() {
   final textures = textureCacheFootprint();
+  final presentation = Surface.livePresentationTextures;
   return MemoryReport([
     MemoryCategory(
       name: 'textures',
@@ -80,6 +81,11 @@ MemoryReport takeMemoryReport() {
       name: 'render targets',
       bytes: Surface.liveTransientBytes,
       count: Surface.liveCount,
+    ),
+    MemoryCategory(
+      name: 'presentation textures',
+      bytes: presentation.bytes,
+      count: presentation.count,
     ),
     // A template's footprint is spread across the geometry, materials, and
     // textures it realized, which are not individually measurable from here

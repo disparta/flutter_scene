@@ -544,6 +544,10 @@ base class Scene implements SceneGraph {
         gpu.gpuContext.doesSupportOffscreenMSAA;
   }
 
+  /// Process-wide transient allocation count, for steady-state profiling.
+  static int get transientTexturesCreated =>
+      TransientTexturePool.texturesCreated;
+
   double _renderScale = 1.0;
 
   /// Scales the resolution screen views render at, relative to the
@@ -3670,6 +3674,8 @@ base class Scene implements SceneGraph {
       outputColor: swapchainColor,
       pixelSize: pixelSize,
       viewportSize: drawArea.size,
+      effectiveRenderScale:
+          (view.renderScale ?? _renderScale) * adaptiveRenderScale,
       pool: activeSurface.transientTexturePool(viewIndex),
       environmentMap: environmentMap,
       transientsBuffer: transientsBuffer,
@@ -3959,6 +3965,7 @@ base class Scene implements SceneGraph {
     // (see CameraProjection.getProjectionMatrixForViewport). Defaults to
     // [pixelSize] for views with no logical size (render textures, probes).
     ui.Size? viewportSize,
+    double effectiveRenderScale = 1,
     required TransientTexturePool pool,
     required EnvironmentMap environmentMap,
     required TransientWriter transientsBuffer,
@@ -3999,7 +4006,10 @@ base class Scene implements SceneGraph {
       viewIndex: viewIndex,
       width: pixelSize.width.toInt(),
       height: pixelSize.height.toInt(),
+      outputWidth: outputColor.width,
+      outputHeight: outputColor.height,
       offscreen: viewIndex < 0,
+      renderScale: effectiveRenderScale,
     );
     final viewWatch = viewStats == null ? null : (Stopwatch()..start());
     // Bound to the logical size so every pass renders the volume picking
