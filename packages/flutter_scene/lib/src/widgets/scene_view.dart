@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' show Timeline;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart'
@@ -122,6 +123,7 @@ class SceneView extends StatefulWidget {
     this.onTick,
     this.clock,
     this.maxFrameRate,
+    this.restBetweenFrames = true,
     this.loading,
     this.loadingBuilder,
     this.errorBuilder,
@@ -171,6 +173,7 @@ class SceneView extends StatefulWidget {
     this.onTick,
     this.clock,
     this.maxFrameRate,
+    this.restBetweenFrames = true,
     this.loading,
     this.loadingBuilder,
     this.errorBuilder,
@@ -275,6 +278,13 @@ class SceneView extends StatefulWidget {
   /// display renders every other refresh), which suits screen recording and
   /// saves power. Skipped refreshes neither call [onTick] nor repaint.
   final double? maxFrameRate;
+
+  /// Whether a [maxFrameRate] that skips whole display refreshes also stops
+  /// the view from scheduling Flutter frames on them, so the rest of the app
+  /// is not recomposited between scene frames on the view's account. True by
+  /// default; false keeps the view ticking on every refresh and returning
+  /// early. The web paces its ticker by its own rule either way.
+  final bool restBetweenFrames;
 
   /// Resources this view waits for before it reveals the scene.
   ///
@@ -385,6 +395,13 @@ class _SceneViewState extends State<SceneView>
   // frame-timestamp time; null renders the next tick.
   Duration? _frameDue;
   final PacedTickerSleep _pace = PacedTickerSleep();
+
+  // Wakes the ticker for the next capped frame off the web. A running ticker
+  // schedules a Flutter frame on every display refresh, and Flutter
+  // composites each one in full whether or not anything changed, so under a
+  // cap that skips refreshes the ticker is muted between frames instead of
+  // ticking and returning early.
+  Timer? _wake;
 
   Clock get _clock => widget.clock ?? clock;
 
@@ -516,7 +533,12 @@ class _SceneViewState extends State<SceneView>
   // sleeping ticker paints on its next vsync with a tick.
   void _onRepaintRequested() {
     if (widget.autoTick && _revealed) {
-      if (_pace.isSleeping) {
+      if (_wake != null) {
+        // Resting between capped frames: wake and render on the next refresh.
+        _wakeTicker();
+        _frameDue = null;
+        if (_ticker?.isTicking ?? false) return;
+      } else if (_pace.isSleeping) {
         _pace.cancelTimer();
         _frameDue = null;
         _resumePacedTicker();
@@ -572,6 +594,12 @@ class _SceneViewState extends State<SceneView>
     if (widget.maxFrameRate != oldWidget.maxFrameRate ||
         (widget.clock != null && _pace.isSleeping)) {
       _resetPacing(wakeIfSleeping: true);
+    }
+    if (_wake != null &&
+        (widget.maxFrameRate != oldWidget.maxFrameRate ||
+            widget.restBetweenFrames != oldWidget.restBetweenFrames ||
+            widget.autoTick != oldWidget.autoTick)) {
+      _wakeTicker();
     }
     if (widget.autoTick != oldWidget.autoTick) {
       // One ticker for the state's life, stopped and restarted: the
@@ -751,6 +779,7 @@ class _SceneViewState extends State<SceneView>
       // A quarter period of slack picks the refresh nearest the deadline.
       if (due != null && frameTimeStamp < due - period ~/ 4) {
         _pace.noteSkip();
+        _restUntil(due - frameTimeStamp, period);
         return;
       }
       // Deadlines advance by whole periods to hold the average rate; one
@@ -769,6 +798,61 @@ class _SceneViewState extends State<SceneView>
     widget.onTick?.call(revealElapsed, deltaSeconds);
     _repaint.notify();
     _afterFrameTick(rate, now, frameTimeStamp);
+    final due = _frameDue;
+    if (rate != null && rate > 0 && due != null) {
+      _restUntil(
+        due - frameTimeStamp,
+        Duration(microseconds: (1e6 / rate).round()),
+      );
+    }
+  }
+
+  // Mutes the ticker until shortly before the frame due in [untilDue], when
+  // the cap's [period] leaves at least one whole display refresh to skip.
+  // The web stops and restarts its ticker instead (see [_afterFrameTick]).
+  void _restUntil(Duration untilDue, Duration period) {
+    final ticker = _ticker;
+    if (kIsWeb || ticker == null || ticker.muted || !widget.restBetweenFrames) {
+      return;
+    }
+    final rate = View.maybeOf(context)?.display.refreshRate ?? 0;
+    final refresh = Duration(
+      microseconds: (1e6 / (rate.isFinite && rate > 0 ? rate : 60)).round(),
+    );
+    if (period < refresh * 1.5) return;
+    // Wake just after the refresh before the deadline's own has passed,
+    // which leaves a timer running late nearly a whole refresh to still
+    // catch the deadline. Waking a little early only costs one tick that
+    // returns without rendering.
+    final lead = refresh - const Duration(milliseconds: 2);
+    final wait = untilDue - lead - _sinceFrameStart(period);
+    if (wait < const Duration(milliseconds: 2)) return;
+    ticker.muted = true;
+    _wake?.cancel();
+    _wake = Timer(wait, _wakeTicker);
+  }
+
+  // How long ago the frame being built began, by the engine's own clock.
+  // The ticker's elapsed time is the frame's vsync, and a busy raster thread
+  // holds the UI thread's frame back by most of a refresh, so a rest timed
+  // from the tick alone would wake after the refresh it aimed for. Zero when
+  // the two clocks do not line up (tests drive frames with their own).
+  Duration _sinceFrameStart(Duration period) {
+    final late =
+        Timeline.now -
+        SchedulerBinding.instance.currentSystemFrameTimeStamp.inMicroseconds;
+    return late > 0 && late < period.inMicroseconds
+        ? Duration(microseconds: late)
+        : Duration.zero;
+  }
+
+  // Ends a rest early or on time. The ticker provider mutes the ticker
+  // itself while tickers are disabled for this subtree, which stands.
+  void _wakeTicker() {
+    _wake?.cancel();
+    _wake = null;
+    if (!mounted) return;
+    _ticker?.muted = !TickerMode.getValuesNotifier(context).value.enabled;
   }
 
   Camera? _lastBuiltCamera;
@@ -887,6 +971,7 @@ class _SceneViewState extends State<SceneView>
     );
     _scene.repaintRequested.removeListener(_onRepaintRequested);
     _pace.cancelTimer();
+    _wake?.cancel();
     _ticker?.dispose();
     _repaint.dispose();
     _elapsed.dispose();
